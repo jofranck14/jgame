@@ -1,0 +1,22 @@
+import api from "./api";
+
+export const listTournamentsApi  = ()                       => api.get("/tournaments");
+export const getTournamentApi    = (id: number | string)    => api.get(`/tournaments/${id}`);
+export const joinTournamentApi   = (id: number | string)    => api.post(`/tournaments/${id}/join`);
+export const listGamesApi        = ()                       => api.get("/games");
+export const getGameApi          = (id: number | string)    => api.get(`/games/${id}`);
+export const getLeaderboardApi   = ()                       => api.get("/results/leaderboard");
+export const getGameLeaderboard  = (id: number | string)    => api.get(`/results/leaderboard/${id}`);
+export const getUserGamesApi     = (userId: number | string)=> api.get(`/users/${userId}/games`);
+export const addUserGameApi      = (userId: number | string, gameId: number) => api.post(`/users/${userId}/games`, { game_id: gameId });
+export const removeUserGameApi   = (userId: number | string, gameId: number) => api.delete(`/users/${userId}/games/${gameId}`);
+export const findPlayersApi      = (params: object)         => api.get("/users", { params });
+export const getNotificationsApi = ()                       => api.get("/notifications");
+export const markAllReadApi      = ()                       => api.patch("/notifications/read-all");
+export const markNotifReadApi    = (id: number)             => api.patch(`/notifications/${id}/read`);
+export const getReviewsApi       = (id: number | string)    => api.get(`/reviews/organizer/${id}`);
+export const createReviewApi     = (data: object)           => api.post("/reviews", data);
+export const createReportApi     = (data: object)           => api.post("/reports", data);
+export const createTournamentApi   = (data: object)           => api.post("/tournaments", data);
+export const getMeApi            = ()                       => api.get("/users/me");
+export const getUserApi          = (id: number | string)    => api.get(`/users/${id}`);

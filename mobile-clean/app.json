@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "JGAME",
+    "slug": "jgame",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/logo.png",
+    "scheme": "jgame",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/logo.png",
+        "backgroundColor": "#0F172A"
+      },
+      "package": "cm.jgame.app"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "cm.jgame.app"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ]
+  }
+}

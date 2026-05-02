@@ -1,0 +1,79 @@
+mobile-clean/
+├── .expo/
+├── .git/
+├── .gitignore
+├── .vscode/
+├── app/
+│   ├── (tabs)/
+│   │   ├── explore.tsx
+│   │   ├── index.tsx
+│   │   └── _layout.tsx
+│   ├── modal.tsx
+│   └── _layout.tsx
+├── app.json
+├── App.tsx
+├── assets/
+├── babel.config.js
+├── components/
+├── constants/
+├── eslint.config.js
+├── expo-env.d.ts
+├── hooks/
+├── node_modules/
+├── package-lock.json
+├── package.json
+├── README.md
+├── scripts/
+├── src/
+│   ├── api/
+│   │   ├── api.ts
+│   │   └── tournamentApi.ts
+│   ├── components/
+│   │   ├── layout/
+│   │   │   └── Header.tsx
+│   │   └── ui/
+│   │       ├── Button.tsx
+│   │       ├── Card.tsx
+│   │       ├── Input.tsx
+│   │       ├── PlacesBar.tsx
+│   │       └── StatusBadge.tsx
+│   ├── features/
+│   │   └── tournaments/
+│   │       └── tournamentApi.ts
+│   ├── navigation/
+│   │   ├── AppTabs.tsx
+│   │   ├── GamesStack.tsx
+│   │   ├── ProfileStack.tsx
+│   │   ├── RootNavigator.tsx
+│   │   ├── TournamentsStack.tsx
+│   │   └── types.ts
+│   ├── screens/
+│   │   ├── auth/
+│   │   │   ├── LoginScreen.tsx
+│   │   │   └── RegisterScreen.tsx
+│   │   ├── chat/
+│   │   │   ├── ChatListScreen.tsx
+│   │   │   └── ChatScreen.tsx
+│   │   ├── games/
+│   │   │   ├── GameScreen.tsx
+│   │   │   └── GamesScreen.tsx
+│   │   ├── home/
+│   │   │   └── HomeScreen.tsx
+│   │   ├── leaderboard/
+│   │   │   └── LeaderboardScreen.tsx
+│   │   ├── matchmaking/
+│   │   │   └── MatchmakingScreen.tsx
+│   │   ├── notifications/
+│   │   │   └── NotificationsScreen.tsx
+│   │   ├── profile/
+│   │   │   └── ProfileScreen.tsx
+│   │   └── tournaments/
+│   │       ├── TournamentScreen.tsx
+│   │       └── TournamentsScreen.tsx
+│   ├── store/
+│   │   └── authStore.ts
+│   ├── theme/
+│   │   └── colors.ts
+│   └── utils/
+│       └── formatDate.ts
+├── tsconfig.json
