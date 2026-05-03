@@ -4,6 +4,7 @@ import { ProfileStackParamList } from "./types";
 import ProfileScreen       from "../screens/profile/ProfileScreen";
 import MatchmakingScreen   from "../screens/matchmaking/MatchmakingScreen";
 import NotificationsScreen from "../screens/notifications/NotificationsScreen";
+import ChatListScreen      from "../screens/chat/ChatListScreen";
 import ChatScreen          from "../screens/chat/ChatScreen";
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -15,6 +16,7 @@ export default function ProfileStack() {
       <Stack.Screen name="UserProfile"   component={ProfileScreen} />
       <Stack.Screen name="Matchmaking"   component={MatchmakingScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen name="ChatList"      component={ChatListScreen} />
       <Stack.Screen name="Chat"          component={ChatScreen} />
     </Stack.Navigator>
   );

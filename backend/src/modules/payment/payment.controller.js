@@ -76,7 +76,7 @@ async function updateProof(req, res, next) {
   try {
     const payment_id = toInt(req.body?.payment_id, "payment_id");
     const method     = req.body?.method ? String(req.body.method).trim() : null;
-    const proof_image = req.file ? `/uploads/${req.file.filename}` : null;
+    const proof_image = req.file ? req.file.path : null;
 
     if (!proof_image) {
       res.status(400);

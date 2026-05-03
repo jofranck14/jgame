@@ -2,11 +2,13 @@ import React, { useEffect, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, ActivityIndicator, Alert, Modal, Pressable,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { C } from "../src/theme/colors";
 import { listGamesApi, createTournamentApi } from "../src/api/tournamentApi";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useAuthStore } from "../src/store/authStore";
 
 const CITIES = [
@@ -37,10 +39,27 @@ export default function CreateTournamentScreen() {
   const [selectedGame, setSelectedGame]     = useState<any>(null);
   const [price, setPrice]                   = useState("0");
   const [maxPlayers, setMaxPlayers]         = useState("");
-  const [date, setDate]                     = useState("");
   const [type, setType]                     = useState<"online"|"physical">("online");
   const [city, setCity]                     = useState("");
   const [locationDetails, setLocationDetails] = useState("");
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+
+// Formater la date pour le backend
+const formatForBackend = (d: Date): string => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// Formater pour affichage
+const formatDisplay = (d: Date): string => {
+  return d.toLocaleDateString("fr-FR", {
+    weekday: "short", day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+};
 
   useEffect(() => {
     if (!["organizer","admin"].includes(user?.role || "")) {
@@ -51,13 +70,13 @@ export default function CreateTournamentScreen() {
     listGamesApi()
       .then((r) => setGames(r.data?.games || r.data || []))
       .catch(() => Alert.alert("Erreur", "Impossible de charger les jeux"));
-  }, []);
+  }, [user?.role]);
 
   const handleSubmit = async () => {
     if (!title.trim())    return Alert.alert("Champ requis", "Entre le nom du tournoi");
     if (!selectedGame)    return Alert.alert("Champ requis", "Choisis un jeu");
     if (!maxPlayers)      return Alert.alert("Champ requis", "Entre le nombre de joueurs maximum");
-    if (!date.trim())     return Alert.alert("Champ requis", "Entre la date");
+    if (!selectedDate)    return Alert.alert("Champ requis", "Choisis la date et l'heure");
     if (type === "physical" && !city) return Alert.alert("Champ requis", "Choisis une ville");
 
     setLoading(true);
@@ -67,7 +86,7 @@ export default function CreateTournamentScreen() {
         game_id:          selectedGame.id,
         price:            Number(price) || 0,
         max_players:      Number(maxPlayers),
-        date:             date.trim(),
+        date:             formatForBackend(selectedDate),
         type,
         city:             type === "physical" ? city : null,
         location_details: type === "physical" ? locationDetails.trim() || null : null,
@@ -185,15 +204,56 @@ export default function CreateTournamentScreen() {
         </View>
 
         {/* Date */}
-        <Text style={s.label}>Date et heure * <Text style={s.dateFmt}>(format: 2025-06-15 18:00)</Text></Text>
-        <TextInput
-          style={iStyle}
-          placeholder="2025-06-15 18:00"
-          placeholderTextColor={C.grayDark}
-          value={date}
-          onChangeText={setDate}
-        />
+       {/* Date */}
+<Text style={s.label}>Date et heure *</Text>
+<TouchableOpacity
+  style={s.selectBtn}
+  onPress={() => setShowDatePicker(true)}
+>
+  <Text style={s.selectTxt}>📅 {formatDisplay(selectedDate)}</Text>
+  <Text style={s.selectArrow}>▾</Text>
+</TouchableOpacity>
 
+{/* Sélecteur de date */}
+{showDatePicker && (
+  <DateTimePicker
+    value={selectedDate}
+    mode={Platform.OS === "ios" ? "datetime" : "date"}
+    display={Platform.OS === "ios" ? "spinner" : "default"}
+    minimumDate={new Date()}
+    onChange={(event, date) => {
+      if (Platform.OS === "android") {
+        setShowDatePicker(false);
+        if (date) {
+          const updated = new Date(selectedDate);
+          updated.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+          setSelectedDate(updated);
+          setShowTimePicker(true);
+        }
+      } else {
+        if (date) setSelectedDate(date);
+        setShowDatePicker(false);
+      }
+    }}
+  />
+)}
+
+{/* Sélecteur d'heure */}
+        {Platform.OS === "android" && showTimePicker && (
+          <DateTimePicker
+            value={selectedDate}
+            mode="time"
+            display="default"
+            onChange={(event, date) => {
+              setShowTimePicker(false);
+              if (date) {
+                const updated = new Date(selectedDate);
+                updated.setHours(date.getHours(), date.getMinutes());
+                setSelectedDate(updated);
+              }
+            }}
+          />
+        )}
         {/* Récompenses */}
         <View style={s.rewardBox}>
           <Text style={s.rewardTitle}>🏅 Récompenses automatiques</Text>

@@ -23,6 +23,7 @@ interface AuthState {
   logout: () => Promise<void>;
   loadFromStorage: () => Promise<void>;
   updateUser: (data: Partial<User>) => void;
+  refreshUser: () => Promise<void>; // ← nouveau
 }
 
 export const useAuthStore = create<AuthState>()((set, get) => ({
@@ -38,11 +39,34 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       ]);
       if (token && userStr) {
         set({ token, user: JSON.parse(userStr), isLoading: false });
+        // Rafraîchir le profil depuis l'API en arrière-plan
+        try {
+          const res = await api.get("/users/me");
+          const freshUser = res.data?.user || res.data;
+          if (freshUser) {
+            set({ user: freshUser });
+            await AsyncStorage.setItem("jgame_user", JSON.stringify(freshUser));
+          }
+        } catch {}
       } else {
         set({ isLoading: false });
       }
     } catch {
       set({ isLoading: false });
+    }
+  },
+
+  // Recharger le profil depuis l'API (utile après changement de rôle)
+  refreshUser: async () => {
+    try {
+      const res = await api.get("/users/me");
+      const freshUser = res.data?.user || res.data;
+      if (freshUser) {
+        set({ user: freshUser });
+        await AsyncStorage.setItem("jgame_user", JSON.stringify(freshUser));
+      }
+    } catch (e) {
+      console.error("refreshUser error:", e);
     }
   },
 

@@ -1,328 +1,521 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, ActivityIndicator, RefreshControl, Modal, Pressable,
+  ActivityIndicator, Alert, Modal, Pressable, Image, Platform,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { useLocalSearchParams, router } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import { useFocusEffect } from "@react-navigation/native";
 import { C } from "../../src/theme/colors";
 import Card from "../../src/components/ui/Card";
 import StatusBadge from "../../src/components/ui/StatusBadge";
-import { listTournamentsApi, listGamesApi } from "../../src/api/tournamentApi";
+import { getTournamentApi, joinTournamentApi } from "../../src/api/tournamentApi";
 import { useAuthStore } from "../../src/store/authStore";
 import { formatDateTime } from "../../src/utils/formatDate";
+import api from "../../src/api/api";
 
-const PER_PAGE = 8;
+/* ─── PlacesBar ─────────────────────────────────────── */
+function PlacesBar({ current, max }: { current: number; max: number }) {
+  const pct      = max > 0 ? Math.min((current / max) * 100, 100) : 0;
+  const isFull   = current >= max;
+  const isWarn   = pct >= 75 && !isFull;
+  const barColor = isFull ? C.red : isWarn ? C.yellow : C.purple;
+  const remaining = max - current;
+  return (
+    <View>
+      <View style={pb.row}>
+        <Text style={pb.label}>👥 Places</Text>
+        <Text style={[pb.count, isFull && { color: C.red }, isWarn && { color: C.yellow }]}>
+          {current} / {max}
+        </Text>
+      </View>
+      <View style={pb.track}>
+        <View style={[pb.fill, { width: `${pct}%` as any, backgroundColor: barColor }]} />
+      </View>
+      <View style={pb.row}>
+        <Text style={pb.pct}>{Math.round(pct)}% rempli</Text>
+        {isFull
+          ? <Text style={pb.fullText}>🔴 Complet — inscriptions fermées</Text>
+          : <Text style={[pb.rem, isWarn && { color: C.yellow }]}>
+              {remaining} place{remaining > 1 ? "s" : ""} restante{remaining > 1 ? "s" : ""}
+            </Text>
+        }
+      </View>
+    </View>
+  );
+}
+const pb = StyleSheet.create({
+  row:      { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  label:    { color: C.gray, fontSize: 13, fontWeight: "600" },
+  count:    { color: C.white, fontSize: 13, fontWeight: "700" },
+  track:    { height: 10, borderRadius: 5, backgroundColor: C.border, overflow: "hidden", marginBottom: 6 },
+  fill:     { height: 10, borderRadius: 5 },
+  pct:      { color: C.grayDark, fontSize: 11 },
+  fullText: { color: C.red, fontSize: 11, fontWeight: "600" },
+  rem:      { color: C.green, fontSize: 11, fontWeight: "600" },
+});
 
-const STATUS_OPTIONS = [
-  { v: "",          l: "Tous",     emoji: "🔄" },
-  { v: "pending",   l: "À venir",  emoji: "⏳" },
-  { v: "ongoing",   l: "En cours", emoji: "▶️" },
-  { v: "completed", l: "Terminé",  emoji: "✅" },
-  { v: "cancelled", l: "Annulé",   emoji: "❌" },
-];
+/* ─── InfoTile ──────────────────────────────────────── */
+function InfoTile({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={it.wrap}>
+      <Text style={it.label}>{label}</Text>
+      <Text style={it.value}>{value}</Text>
+    </View>
+  );
+}
+const it = StyleSheet.create({
+  wrap:  { flex: 1, backgroundColor: C.bg, borderRadius: 12, padding: 12,
+           borderWidth: 0.5, borderColor: C.border, margin: 4 },
+  label: { color: C.grayDark, fontSize: 11, marginBottom: 3 },
+  value: { color: C.white, fontWeight: "600", fontSize: 13 },
+});
 
-const TYPE_OPTIONS = [
-  { v: "",         l: "Tous",        emoji: "🔄" },
-  { v: "online",   l: "En ligne",    emoji: "🌐" },
-  { v: "physical", l: "Présentiel",  emoji: "📍" },
-];
+/* ══════════════════════════════════════════════════════ */
+export default function TournamentDetailScreen() {
+  const { id }   = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuthStore();
 
-export default function TournamentsScreen() {
-  const { user }                      = useAuthStore();
-  const [tournaments, setTournaments] = useState<any[]>([]);
-  const [games, setGames]             = useState<any[]>([]);
+  const [tournament, setTournament]   = useState<any>(null);
   const [loading, setLoading]         = useState(true);
   const [refreshing, setRefreshing]   = useState(false);
+  const [joining, setJoining]         = useState(false);
 
-  const [search, setSearch]             = useState("");
-  const [filterGame, setFilterGame]     = useState("");
-  const [filterStatus, setFilterStatus] = useState("");
-  const [filterType, setFilterType]     = useState("");
-  const [page, setPage]                 = useState(1);
-  const [filterModal, setFilterModal]   = useState(false);
+  const [payModal, setPayModal]       = useState(false);
+  const [paymentInfo, setPaymentInfo] = useState<any>(null);
+  const [proofUri, setProofUri]       = useState<string | null>(null);
+  const [submitting, setSubmitting]   = useState(false);
 
-  const canCreate = ["organizer", "admin"].includes(user?.role || "");
-
-  useEffect(() => {
-    listGamesApi()
-      .then((r) => setGames(r.data?.games || r.data || []))
-      .catch(() => {});
-  }, []);
-
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
-      const res = await listTournamentsApi();
-      setTournaments(res.data?.tournaments || res.data?.data || res.data || []);
-    } catch {}
-    finally { setLoading(false); setRefreshing(false); }
-  }, []);
+      const res = await getTournamentApi(id!);
+      setTournament(res.data?.tournament ?? res.data);
+    } catch {
+      Alert.alert("Erreur", "Tournoi introuvable");
+      router.back();
+    } finally { setLoading(false); setRefreshing(false); }
+  }, [id]);
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const filtered = tournaments.filter((t) => {
-    const mS  = !search       || t.title?.toLowerCase().includes(search.toLowerCase());
-    const mG  = !filterGame   || String(t.game_id) === String(filterGame);
-    const mSt = !filterStatus || t.status  === filterStatus;
-    const mT  = !filterType   || t.type    === filterType;
-    return mS && mG && mSt && mT;
-  });
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  const paginated  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-  const hasFilters = !!(search || filterGame || filterStatus || filterType);
-  const activeFiltersCount = [filterGame, filterStatus, filterType].filter(Boolean).length;
-
-  const reset = () => {
-    setSearch(""); setFilterGame(""); setFilterStatus(""); setFilterType(""); setPage(1);
+  const handleJoin = async () => {
+    if (!tournament) return;
+    if (tournament.current_players >= tournament.max_players) {
+      Alert.alert("Complet", "Ce tournoi n'a plus de places disponibles.");
+      return;
+    }
+    setJoining(true);
+    try {
+      const res  = await joinTournamentApi(id!);
+      const data = res.data;
+      if (data?.paymentRequired) {
+        setPaymentInfo(data.payment);
+        setPayModal(true);
+      } else {
+        Alert.alert("🎉 Inscrit !", "Tu as rejoint le tournoi avec succès !");
+        load(true);
+      }
+    } catch (e: any) {
+      const msg = e.response?.data?.message ?? "Erreur";
+      Alert.alert(
+        msg.toLowerCase().includes("already") || msg.toLowerCase().includes("déjà")
+          ? "Déjà inscrit"
+          : "Erreur",
+        msg
+      );
+      load(true);
+    } finally { setJoining(false); }
   };
+
+  /* ── Choisir image ── */
+  const pickImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission refusée", "Autorise l'accès à la galerie dans les paramètres.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setProofUri(result.assets[0].uri);
+    }
+  };
+
+  /* ── Annuler modal ── */
+  const cancelPayment = () => {
+    setPayModal(false);
+    setProofUri(null);
+    setPaymentInfo(null);
+  };
+
+  /* ── Envoyer preuve ── */
+  const submitPayment = async () => {
+    if (!proofUri) {
+      Alert.alert("", "Ajoute la capture d'écran de ton paiement avant d'envoyer.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append("payment_id", String(paymentInfo?.id));
+      formData.append("method",     "mtn");
+      formData.append("proof_image", {
+        uri:  proofUri,
+        type: "image/jpeg",
+        name: "proof.jpg",
+      } as any);
+      await api.patch("/payments/proof", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      Alert.alert("✅ Envoyé !", "Capture envoyée. En attente de validation admin (24h max).");
+      cancelPayment();
+      load(true);
+    } catch (e: any) {
+      Alert.alert("Erreur", e.response?.data?.message ?? "Erreur lors de l'envoi");
+    } finally { setSubmitting(false); }
+  };
+
+  if (loading) return (
+    <SafeAreaView style={s.root}>
+      <View style={s.center}><ActivityIndicator size="large" color={C.purple} /></View>
+    </SafeAreaView>
+  );
+  if (!tournament) return null;
+
+  const current       = tournament.current_players || 0;
+  const max           = tournament.max_players     || 0;
+  const price         = Number(tournament.price)   || 0;
+  const isFull        = current >= max;
+  const isCompleted   = tournament.status === "completed";
+  const isCancelled   = tournament.status === "cancelled";
+  const isOngoing     = tournament.status === "ongoing";
+  const isParticipant = tournament.participants?.some(
+    (p: any) => Number(p.user_id) === Number(user?.id)
+  );
+  const canJoin   = !isFull && !isCompleted && !isCancelled && !isOngoing && !!user && !isParticipant;
+  const pct       = max > 0 ? (current / max) * 100 : 0;
+  const remaining = max - current;
+  const prizePool = price > 0
+    ? `${Math.round(price * max * 0.7).toLocaleString()} FCFA`
+    : "Trophée JGAME 🏆";
 
   return (
     <SafeAreaView style={s.root}>
-
-      {/* ── Header ── */}
-      <View style={s.header}>
-        <View>
-          <Text style={s.title}>🏆 Tournois</Text>
-          <Text style={s.sub}>
-            {loading ? "Chargement..." : `${filtered.length} résultat${filtered.length !== 1 ? "s" : ""}`}
-          </Text>
-        </View>
-
-        <View style={s.headerActions}>
-          {/* Bouton filtres */}
-          <TouchableOpacity
-            style={[s.iconBtn, activeFiltersCount > 0 && s.iconBtnActive]}
-            onPress={() => setFilterModal(true)}
-          >
-            <Text style={s.iconBtnEmoji}>⚙️</Text>
-            {activeFiltersCount > 0 && (
-              <View style={s.badge}>
-                <Text style={s.badgeTxt}>{activeFiltersCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          {/* Bouton créer — visible uniquement pour organizer/admin */}
-          {canCreate && (
-            <TouchableOpacity
-              style={s.createBtn}
-              onPress={() => router.push("/create-tournament")}
-              activeOpacity={0.85}
-            >
-              <Text style={s.createBtnTxt}>+ Créer</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
-      {/* ── Barre de recherche ── */}
-      <View style={s.searchRow}>
-        <Text style={s.searchIcon}>🔍</Text>
-        <TextInput
-          style={s.searchInput}
-          placeholder="Rechercher un tournoi..."
-          placeholderTextColor={C.grayDark}
-          value={search}
-          onChangeText={(v) => { setSearch(v); setPage(1); }}
-        />
-        {!!search && (
-          <TouchableOpacity onPress={() => { setSearch(""); setPage(1); }} hitSlop={8}>
-            <Text style={{ color: C.gray, fontSize: 16, paddingHorizontal: 8 }}>✕</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* ── Filtres rapides (chips statut) ── */}
       <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={s.chipsScroll}
-        contentContainerStyle={s.chipsContent}
-      >
-        {STATUS_OPTIONS.map((opt) => (
-          <TouchableOpacity
-            key={opt.v}
-            style={[s.chip, filterStatus === opt.v && s.chipActive]}
-            onPress={() => { setFilterStatus(opt.v); setPage(1); }}
-          >
-            <Text style={[s.chipTxt, filterStatus === opt.v && s.chipTxtActive]}>
-              {opt.emoji} {opt.l}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* ── Liste ── */}
-      <ScrollView
-        contentContainerStyle={s.list}
+        contentContainerStyle={{ paddingBottom: 40 }}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
+          <RefreshControl refreshing={refreshing}
             onRefresh={() => { setRefreshing(true); load(); }}
             tintColor={C.purple}
           />
         }
       >
-        {loading ? (
-          <View style={s.center}>
-            <ActivityIndicator size="large" color={C.purple} />
+        {/* Back */}
+        <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
+          <Text style={s.backText}>← Retour</Text>
+        </TouchableOpacity>
+
+        {/* ══ HERO ══ */}
+        <View style={s.hero}>
+          <View style={s.heroGlow} />
+          <StatusBadge status={tournament.status} />
+          <View style={s.heroContent}>
+            <View style={s.heroLeft}>
+              <Text style={s.heroTitle}>{tournament.title}</Text>
+              <Text style={s.heroMeta}>
+                🎮 {tournament.game_name || "—"}
+                {tournament.city ? `  ·  📍 ${tournament.city}` : ""}
+                {"  ·  "}
+                {tournament.type === "physical" ? "Présentiel" : "🌐 En ligne"}
+              </Text>
+            </View>
+            <View style={s.heroRight}>
+              <Text style={s.heroPrice}>
+                {price > 0 ? `${price.toLocaleString()} FCFA` : "Gratuit"}
+              </Text>
+              <Text style={s.heroPriceLbl}>Prix d'entrée</Text>
+            </View>
           </View>
-        ) : paginated.length === 0 ? (
-          <View style={s.emptyBox}>
-            <Text style={{ fontSize: 48, marginBottom: 12 }}>🏆</Text>
-            <Text style={s.emptyTitle}>Aucun tournoi trouvé</Text>
-            {hasFilters && (
-              <TouchableOpacity onPress={reset} style={s.resetBtn}>
-                <Text style={s.resetBtnTxt}>✕ Effacer les filtres</Text>
-              </TouchableOpacity>
+        </View>
+
+        {/* Infos grid */}
+        <View style={s.infoGrid}>
+          <InfoTile label="📅 Date de début" value={formatDateTime(tournament.date)} />
+          <InfoTile label="🏟️ Type"
+            value={tournament.type === "physical" ? "Présentiel" : "🌐 En ligne"} />
+          <InfoTile label="🥇 1ère place" value="+20 pts" />
+          <InfoTile label="🥈 2ème place" value="+10 pts" />
+        </View>
+
+        {/* Lieu */}
+        {(tournament.location_details || tournament.city) && (
+          <Card style={s.card}>
+            <Text style={s.cardTitle}>
+              {tournament.type === "physical" ? "📍 Lieu du tournoi" : "ℹ️ Détails"}
+            </Text>
+            {tournament.city && <Text style={s.locCity}>🏙️ {tournament.city}</Text>}
+            {tournament.location_details && (
+              <View style={s.locBox}>
+                <Text style={s.locText}>{tournament.location_details}</Text>
+              </View>
             )}
-          </View>
-        ) : (
-          paginated.map((t) => {
-            const isFull   = t.current_players >= t.max_players;
-            const progress = t.max_players > 0
-              ? Math.min((t.current_players / t.max_players) * 100, 100)
-              : 0;
-            const barColor = isFull ? C.red : progress >= 75 ? C.yellow : C.purple;
+            {tournament.type === "physical" && (
+              <Text style={s.locHint}>
+                📌 Présente-toi à l'adresse indiquée à l'heure du tournoi.
+              </Text>
+            )}
+          </Card>
+        )}
 
-            return (
+        {/* Places */}
+        <Card style={s.card}>
+          <PlacesBar current={current} max={max} />
+        </Card>
+
+        {/* ══ Prize pool + CTA ══ */}
+        <Card style={[s.card, s.actionCard]}>
+          <Text style={s.prizeIcon}>🏆</Text>
+          <Text style={s.prizeLabel}>Prize pool estimé</Text>
+          <Text style={s.prizeValue}>{prizePool}</Text>
+          <Text style={s.prizeNote}>70% du pool · 10% JGAME</Text>
+          <View style={s.divider} />
+
+          {isFull ? (
+            <View style={[s.ctaBox, { backgroundColor: C.redFade, borderColor: C.red }]}>
+              <Text style={[s.ctaText, { color: C.red }]}>🔴 Tournoi complet</Text>
+            </View>
+          ) : isCompleted ? (
+            <View style={[s.ctaBox, { backgroundColor: C.bgCard, borderColor: C.border }]}>
+              <Text style={[s.ctaText, { color: C.grayDark }]}>Tournoi terminé</Text>
+            </View>
+          ) : isCancelled ? (
+            <View style={[s.ctaBox, { backgroundColor: C.redFade, borderColor: C.red }]}>
+              <Text style={[s.ctaText, { color: C.red }]}>Tournoi annulé</Text>
+            </View>
+          ) : isOngoing ? (
+            <View style={[s.ctaBox, { backgroundColor: C.yellowFade, borderColor: C.yellow }]}>
+              <Text style={[s.ctaText, { color: C.yellow }]}>
+                🟡 En cours — inscriptions fermées
+              </Text>
+            </View>
+          ) : isParticipant ? (
+            <View style={[s.ctaBox, { backgroundColor: C.greenFade, borderColor: C.green }]}>
+              <Text style={[s.ctaText, { color: C.green }]}>✅ Tu es inscrit à ce tournoi</Text>
+            </View>
+          ) : !user ? (
+            <View style={[s.ctaBox, { backgroundColor: C.bgCard, borderColor: C.border }]}>
+              <Text style={[s.ctaText, { color: C.gray }]}>Connecte-toi pour rejoindre</Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[s.joinBtn, joining && { opacity: 0.6 }]}
+              onPress={handleJoin}
+              disabled={joining}
+            >
+              {joining
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={s.joinBtnText}>
+                    {price > 0 ? "💳 Rejoindre & Payer" : "🎮 Rejoindre gratuitement"}
+                  </Text>
+              }
+            </TouchableOpacity>
+          )}
+
+          {canJoin && pct >= 90 && (
+            <Text style={s.urgenceRed}>
+              🔥 Plus que {remaining} place{remaining > 1 ? "s" : ""} !
+            </Text>
+          )}
+          {canJoin && pct >= 75 && pct < 90 && (
+            <Text style={s.urgenceYellow}>
+              ⚡ {remaining} place{remaining > 1 ? "s" : ""} restante{remaining > 1 ? "s" : ""}
+            </Text>
+          )}
+        </Card>
+
+        {/* Participants */}
+        {tournament.participants?.length > 0 && (
+          <Card style={s.card}>
+            <Text style={s.cardTitle}>
+              👥 Participants ({tournament.participants.length})
+            </Text>
+            {tournament.participants.map((p: any) => (
               <TouchableOpacity
-                key={String(t.id)}
-                onPress={() => router.push(`/tournament/${t.id}`)}
-                activeOpacity={0.85}
+                key={String(p.user_id)}
+                style={s.participantRow}
+                onPress={() => router.push(`/profile/${p.user_id}`)}
+                activeOpacity={0.75}
               >
-                <Card style={s.card}>
-                  {/* Top */}
-                  <View style={s.cardTop}>
-                    <StatusBadge status={t.status} />
-                    <Text style={s.price}>
-                      {t.price > 0 ? `${Number(t.price).toLocaleString()} FCFA` : "Gratuit"}
-                    </Text>
-                  </View>
-
-                  {/* Titre */}
-                  <Text style={s.cardTitle} numberOfLines={1}>{t.title}</Text>
-
-                  {/* Infos */}
-                  <View style={s.cardInfoRow}>
-                    <Text style={s.cardInfo}>🎮 {t.game_name || "—"}</Text>
-                    <Text style={s.cardInfoDot}>·</Text>
-                    <Text style={s.cardInfo}>
-                      {t.type === "physical" ? `📍 ${t.city || "Physique"}` : "🌐 En ligne"}
-                    </Text>
-                  </View>
-
-                  {t.date && (
-                    <Text style={s.cardDate}>📅 {formatDateTime(t.date)}</Text>
-                  )}
-
-                  {/* Barre de places */}
-                  <View style={s.barRow}>
-                    <Text style={[s.barLabel, isFull && { color: C.red }]}>
-                      {isFull ? "🔴 Complet" : `👥 ${t.current_players}/${t.max_players}`}
-                    </Text>
-                    <View style={s.barBg}>
-                      <View style={[s.barFill, {
-                        width: `${progress}%` as any,
-                        backgroundColor: barColor,
-                      }]} />
-                    </View>
-                    <Text style={s.barPct}>{Math.round(progress)}%</Text>
-                  </View>
-                </Card>
+                <View style={s.pAvatar}>
+                  <Text style={s.pAvatarText}>{p.username?.[0]?.toUpperCase()}</Text>
+                </View>
+                <Text style={s.pName}>{p.username}</Text>
+                <View style={[
+                  s.pStatus,
+                  p.payment_status === "paid"
+                    ? { backgroundColor: C.greenFade, borderColor: C.green }
+                    : { backgroundColor: C.yellowFade, borderColor: C.yellow },
+                ]}>
+                  <Text style={{
+                    color: p.payment_status === "paid" ? C.green : C.yellow,
+                    fontSize: 11, fontWeight: "600",
+                  }}>
+                    {p.payment_status === "paid" ? "✅ Confirmé" : "⏳ En attente"}
+                  </Text>
+                </View>
               </TouchableOpacity>
-            );
-          })
+            ))}
+          </Card>
         )}
 
-        {/* Pagination */}
-        {!loading && totalPages > 1 && (
-          <View style={s.pgRow}>
-            <TouchableOpacity
-              style={[s.pgBtn, page === 1 && s.pgOff]}
-              disabled={page === 1}
-              onPress={() => setPage(page - 1)}
-            >
-              <Text style={s.pgTxt}>←</Text>
-            </TouchableOpacity>
-            <Text style={s.pgInfo}>{page} / {totalPages}</Text>
-            <TouchableOpacity
-              style={[s.pgBtn, page === totalPages && s.pgOff]}
-              disabled={page === totalPages}
-              onPress={() => setPage(page + 1)}
-            >
-              <Text style={s.pgTxt}>→</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        <Card style={[s.card, { alignItems: "center" }]}>
+          <Text style={{ color: C.grayDark, fontSize: 12 }}>
+            📅 Créé le {formatDateTime(tournament.created_at)}
+          </Text>
+        </Card>
       </ScrollView>
 
-      {/* ── Modal filtres avancés ── */}
-      <Modal visible={filterModal} transparent animationType="slide" onRequestClose={() => setFilterModal(false)}>
-        <Pressable style={s.modalOverlay} onPress={() => setFilterModal(false)}>
-          <Pressable style={s.modalBox} onPress={() => {}}>
+      {/* ══ MODAL PAIEMENT ══ */}
+      <Modal
+        visible={payModal}
+        transparent
+        animationType="slide"
+        onRequestClose={cancelPayment}
+      >
+        <Pressable style={pm.overlay} onPress={cancelPayment}>
+          <Pressable style={pm.sheet} onPress={() => {}}>
 
             {/* Poignée */}
-            <View style={s.modalHandle} />
+            <View style={pm.handle} />
 
-            <View style={s.modalHeader}>
-              <Text style={s.modalTitle}>Filtres avancés</Text>
-              {activeFiltersCount > 0 && (
-                <TouchableOpacity onPress={reset}>
-                  <Text style={s.modalReset}>Tout effacer</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Jeu */}
-            <Text style={s.filterLabel}>🎮 Jeu</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
-              <TouchableOpacity
-                style={[s.chip, !filterGame && s.chipActive]}
-                onPress={() => setFilterGame("")}
-              >
-                <Text style={[s.chipTxt, !filterGame && s.chipTxtActive]}>Tous</Text>
-              </TouchableOpacity>
-              {games.map((g) => (
-                <TouchableOpacity
-                  key={String(g.id)}
-                  style={[s.chip, String(filterGame) === String(g.id) && s.chipActive]}
-                  onPress={() => setFilterGame(String(g.id))}
-                >
-                  <Text style={[s.chipTxt, String(filterGame) === String(g.id) && s.chipTxtActive]}>
-                    🎮 {g.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            {/* Type */}
-            <Text style={s.filterLabel}>📡 Type</Text>
-            <View style={s.chipWrap}>
-              {TYPE_OPTIONS.map((opt) => (
-                <TouchableOpacity
-                  key={opt.v}
-                  style={[s.chip, filterType === opt.v && s.chipActive]}
-                  onPress={() => setFilterType(opt.v)}
-                >
-                  <Text style={[s.chipTxt, filterType === opt.v && s.chipTxtActive]}>
-                    {opt.emoji} {opt.l}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Bouton appliquer */}
-            <TouchableOpacity
-              style={s.applyBtn}
-              onPress={() => { setPage(1); setFilterModal(false); }}
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={s.applyBtnTxt}>
-                Appliquer{activeFiltersCount > 0 ? ` (${activeFiltersCount} filtre${activeFiltersCount > 1 ? "s" : ""})` : ""}
-              </Text>
-            </TouchableOpacity>
+              <Text style={pm.title}>💳 Paiement requis</Text>
 
+              {/* Montant */}
+              <View style={pm.amountBox}>
+                <Text style={pm.amountLabel}>Montant à payer</Text>
+                <Text style={pm.amountValue}>
+                  {paymentInfo ? Number(paymentInfo.amount).toLocaleString() : 0} FCFA
+                </Text>
+              </View>
+
+              {/* Instructions */}
+              <View style={pm.instrBox}>
+                <Text style={pm.instrTitle}>📋 Instructions de paiement</Text>
+
+                <Text style={pm.instrLine}>
+                  <Text style={pm.step}>1.  </Text>
+                  <Text style={pm.instrText}>Envoie via </Text>
+                  <Text style={pm.instrBold}>MTN MoMo</Text>
+                  <Text style={pm.instrText}> ou </Text>
+                  <Text style={pm.instrBold}>Orange Money</Text>
+                </Text>
+
+                {/* Numéros */}
+                <View style={pm.numbersBox}>
+                  <View style={pm.numbersHeader}>
+                    <Text style={pm.numbersHeaderTxt}>📱 Numéros de paiement</Text>
+                  </View>
+                  <View style={pm.numberRow}>
+                    <View>
+                      <Text style={pm.networkLabel}>MTN MoMo</Text>
+                      <Text style={pm.numberText}>681 640 130</Text>
+                    </View>
+                    <Text style={{ fontSize: 22 }}>📲</Text>
+                  </View>
+                  <View style={[pm.numberRow, { borderTopWidth: 0.5, borderColor: C.border }]}>
+                    <View>
+                      <Text style={pm.networkLabel}>Orange Money</Text>
+                      <Text style={pm.numberText}>692 099 194</Text>
+                    </View>
+                    <Text style={{ fontSize: 22 }}>📲</Text>
+                  </View>
+                </View>
+
+                <Text style={pm.instrLine}>
+                  <Text style={pm.step}>2.  </Text>
+                  <Text style={pm.instrText}>Bénéficiaire : </Text>
+                  <Text style={pm.instrBold}>BOPDA FEUKOUO JOFRANCK</Text>
+                </Text>
+
+                <Text style={pm.instrLine}>
+                  <Text style={pm.step}>3.  </Text>
+                  <Text style={pm.instrText}>
+                    Fais une capture d'écran de la confirmation de paiement
+                  </Text>
+                </Text>
+
+                <Text style={pm.instrLine}>
+                  <Text style={pm.step}>4.  </Text>
+                  <Text style={pm.instrText}>Uploade la capture ci-dessous</Text>
+                </Text>
+              </View>
+
+              {/* ── Zone upload capture ── */}
+              <Text style={pm.uploadLabel}>
+                📸 Capture d'écran <Text style={{ color: C.red }}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={[pm.uploadZone, !!proofUri && pm.uploadZoneDone]}
+                onPress={pickImage}
+                activeOpacity={0.8}
+              >
+                {proofUri ? (
+                  <>
+                    <Image
+                      source={{ uri: proofUri }}
+                      style={pm.preview}
+                      resizeMode="cover"
+                    />
+                    <Text style={pm.uploadDoneText}>✅ Image sélectionnée</Text>
+                    <Text style={pm.uploadChangeText}>Appuie pour changer</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={pm.uploadIcon}>📸</Text>
+                    <Text style={pm.uploadText}>Appuie pour ajouter la capture</Text>
+                    <Text style={pm.uploadHint}>JPG, PNG, WEBP · Max 5MB</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Avertissement */}
+              <View style={pm.warnBox}>
+                <Text style={pm.warnText}>
+                  ⚠️ Ta participation sera confirmée après vérification par l'admin sous 24h.
+                  Tu recevras une notification de confirmation.
+                </Text>
+              </View>
+
+              {/* ── Boutons Annuler / Envoyer ── */}
+              <View style={pm.btnRow}>
+                <TouchableOpacity style={pm.cancelBtn} onPress={cancelPayment}>
+                  <Text style={pm.cancelBtnText}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    pm.sendBtn,
+                    (!proofUri || submitting) && pm.sendBtnOff,
+                  ]}
+                  onPress={submitPayment}
+                  disabled={!proofUri || submitting}
+                >
+                  {submitting
+                    ? <ActivityIndicator color="#fff" />
+                    : <Text style={pm.sendBtnText}>Envoyer ✅</Text>
+                  }
+                </TouchableOpacity>
+              </View>
+
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -330,61 +523,112 @@ export default function TournamentsScreen() {
   );
 }
 
+/* ─── Styles principaux ─────────────────────────────── */
 const s = StyleSheet.create({
-  root:         { flex: 1, backgroundColor: C.bg },
-  header:       { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
-  title:        { fontSize: 22, fontWeight: "800", color: C.white },
-  sub:          { fontSize: 12, color: C.gray, marginTop: 2 },
-  headerActions:{ flexDirection: "row", gap: 10, alignItems: "center" },
-  iconBtn:      { width: 38, height: 38, borderRadius: 12, backgroundColor: C.bgCard, justifyContent: "center", alignItems: "center", borderWidth: 0.5, borderColor: C.border },
-  iconBtnActive:{ borderColor: C.purple, backgroundColor: C.purpleFade },
-  iconBtnEmoji: { fontSize: 18 },
-  badge:        { position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: 8, backgroundColor: C.red, justifyContent: "center", alignItems: "center" },
-  badgeTxt:     { color: "#fff", fontSize: 9, fontWeight: "800" },
-  createBtn:    { backgroundColor: C.purple, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 9 },
-  createBtnTxt: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  searchRow:    { flexDirection: "row", alignItems: "center", backgroundColor: C.bgCard, borderRadius: 12, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 12, borderWidth: 0.5, borderColor: C.border },
-  searchIcon:   { fontSize: 15, marginRight: 8 },
-  searchInput:  { flex: 1, color: C.white, fontSize: 14, paddingVertical: 11 },
-  chipsScroll:  { flexGrow: 0, marginBottom: 8 },
-  chipsContent: { paddingHorizontal: 16, gap: 8, flexDirection: "row" },
-  chip:         { borderWidth: 1, borderColor: C.border, borderRadius: 99, paddingHorizontal: 14, paddingVertical: 7 },
-  chipActive:   { backgroundColor: C.purpleFade, borderColor: C.purple },
-  chipTxt:      { color: C.gray, fontSize: 12, fontWeight: "500" },
-  chipTxtActive:{ color: C.purple, fontWeight: "700" },
-  chipWrap:     { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 20 },
-  list:         { padding: 16, paddingTop: 4, paddingBottom: 24 },
-  card:         { marginBottom: 10 },
-  cardTop:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  price:        { color: C.cyan, fontWeight: "700", fontSize: 14 },
-  cardTitle:    { fontSize: 15, fontWeight: "700", color: C.white, marginBottom: 5 },
-  cardInfoRow:  { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 3 },
-  cardInfo:     { fontSize: 12, color: C.gray },
-  cardInfoDot:  { fontSize: 12, color: C.grayDark },
-  cardDate:     { fontSize: 11, color: C.grayDark, marginBottom: 8 },
-  barRow:       { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
-  barLabel:     { fontSize: 11, color: C.gray, width: 82, flexShrink: 0 },
-  barBg:        { flex: 1, height: 5, backgroundColor: C.border, borderRadius: 99, overflow: "hidden" },
-  barFill:      { height: 5, borderRadius: 99 },
-  barPct:       { fontSize: 10, color: C.grayDark, width: 30, textAlign: "right" },
-  center:       { paddingTop: 60, alignItems: "center" },
-  emptyBox:     { alignItems: "center", paddingVertical: 60 },
-  emptyTitle:   { color: C.gray, fontSize: 16, fontWeight: "600" },
-  resetBtn:     { marginTop: 16, borderWidth: 1, borderColor: C.border, borderRadius: 99, paddingHorizontal: 16, paddingVertical: 8 },
-  resetBtnTxt:  { color: C.gray, fontSize: 13 },
-  pgRow:        { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 16, paddingVertical: 16 },
-  pgBtn:        { backgroundColor: C.bgCard, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10, borderWidth: 0.5, borderColor: C.border },
-  pgOff:        { opacity: 0.35 },
-  pgTxt:        { color: C.white, fontSize: 16 },
-  pgInfo:       { color: C.gray, fontSize: 14 },
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
-  modalBox:     { backgroundColor: C.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingTop: 12 },
-  modalHandle:  { width: 40, height: 4, backgroundColor: C.border, borderRadius: 99, alignSelf: "center", marginBottom: 16 },
-  modalHeader:  { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  modalTitle:   { fontSize: 18, fontWeight: "700", color: C.white },
-  modalReset:   { color: C.red, fontSize: 13, fontWeight: "600" },
-  filterLabel:  { color: C.gray, fontSize: 13, fontWeight: "600", marginBottom: 10 },
-  applyBtn:     { backgroundColor: C.purple, borderRadius: 14, padding: 16, alignItems: "center", marginTop: 8 },
-  applyBtnTxt:  { color: "#fff", fontWeight: "700", fontSize: 15 },
+  root:          { flex: 1, backgroundColor: C.bg },
+  center:        { flex: 1, justifyContent: "center", alignItems: "center" },
+  backBtn:       { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
+  backText:      { color: C.purple, fontSize: 15, fontWeight: "700" },
+  hero:          { marginHorizontal: 16, borderRadius: 20, overflow: "hidden",
+                   padding: 20, backgroundColor: "#1e1040", marginBottom: 12,
+                   borderWidth: 0.5, borderColor: "rgba(124,58,237,0.3)" },
+  heroGlow:      { position: "absolute", right: -30, top: -30, width: 140, height: 140,
+                   borderRadius: 70, backgroundColor: "rgba(124,58,237,0.18)" },
+  heroContent:   { flexDirection: "row", justifyContent: "space-between",
+                   alignItems: "flex-start", marginTop: 10 },
+  heroLeft:      { flex: 1, marginRight: 12 },
+  heroTitle:     { color: C.white, fontSize: 20, fontWeight: "800", marginBottom: 5 },
+  heroMeta:      { color: C.gray, fontSize: 12 },
+  heroRight:     { alignItems: "flex-end" },
+  heroPrice:     { color: C.cyan, fontSize: 22, fontWeight: "800" },
+  heroPriceLbl:  { color: C.grayDark, fontSize: 11, marginTop: 2 },
+  infoGrid:      { flexDirection: "row", flexWrap: "wrap",
+                   marginHorizontal: 12, marginBottom: 4 },
+  card:          { marginHorizontal: 16, marginBottom: 12 },
+  cardTitle:     { color: C.white, fontWeight: "700", fontSize: 14, marginBottom: 10 },
+  locCity:       { color: C.white, fontWeight: "600", fontSize: 13, marginBottom: 6 },
+  locBox:        { backgroundColor: "rgba(124,58,237,0.08)", borderRadius: 10, padding: 10,
+                   borderWidth: 0.5, borderColor: "rgba(124,58,237,0.2)", marginBottom: 6 },
+  locText:       { color: C.gray, fontSize: 13, lineHeight: 19 },
+  locHint:       { color: C.grayDark, fontSize: 11, marginTop: 2 },
+  actionCard:    { alignItems: "center" },
+  prizeIcon:     { fontSize: 44, marginBottom: 6 },
+  prizeLabel:    { color: C.grayDark, fontSize: 12, marginBottom: 4 },
+  prizeValue:    { color: C.white, fontWeight: "800", fontSize: 18, marginBottom: 2 },
+  prizeNote:     { color: C.grayDark, fontSize: 11, marginBottom: 14 },
+  divider:       { width: "100%", height: 0.5, backgroundColor: C.border, marginBottom: 16 },
+  ctaBox:        { width: "100%", borderRadius: 12, padding: 14,
+                   alignItems: "center", borderWidth: 1 },
+  ctaText:       { fontWeight: "700", fontSize: 14 },
+  joinBtn:       { width: "100%", backgroundColor: C.purple, borderRadius: 14,
+                   padding: 16, alignItems: "center" },
+  joinBtnText:   { color: "#fff", fontWeight: "700", fontSize: 15 },
+  urgenceRed:    { color: C.red, fontSize: 12, marginTop: 10, fontWeight: "700" },
+  urgenceYellow: { color: C.yellow, fontSize: 12, marginTop: 10 },
+  participantRow:{ flexDirection: "row", alignItems: "center",
+                   paddingVertical: 9, borderBottomWidth: 0.5, borderColor: C.border },
+  pAvatar:       { width: 32, height: 32, borderRadius: 16, backgroundColor: C.purple,
+                   justifyContent: "center", alignItems: "center", marginRight: 10 },
+  pAvatarText:   { color: "#fff", fontWeight: "700", fontSize: 13 },
+  pName:         { flex: 1, color: C.white, fontSize: 14 },
+  pStatus:       { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
+});
+
+/* ─── Styles modal paiement ─────────────────────────── */
+const pm = StyleSheet.create({
+  overlay:           { flex: 1, backgroundColor: "rgba(0,0,0,0.7)",
+                       justifyContent: "flex-end" },
+  sheet:             { backgroundColor: C.bgCard, borderTopLeftRadius: 24,
+                       borderTopRightRadius: 24, padding: 22, maxHeight: "92%" },
+  handle:            { width: 40, height: 4, borderRadius: 2, backgroundColor: C.grayDark,
+                       alignSelf: "center", marginBottom: 16 },
+  title:             { color: C.white, fontSize: 19, fontWeight: "800",
+                       textAlign: "center", marginBottom: 16 },
+  amountBox:         { backgroundColor: C.bg, borderRadius: 14, padding: 16,
+                       alignItems: "center", borderWidth: 0.5, borderColor: C.border,
+                       marginBottom: 14 },
+  amountLabel:       { color: C.grayDark, fontSize: 12, marginBottom: 4 },
+  amountValue:       { color: C.cyan, fontSize: 30, fontWeight: "800" },
+  instrBox:          { backgroundColor: C.bg, borderRadius: 14, padding: 14,
+                       borderWidth: 0.5, borderColor: C.border, marginBottom: 14 },
+  instrTitle:        { color: C.white, fontWeight: "700", fontSize: 14, marginBottom: 10 },
+  instrLine:         { marginBottom: 8 },
+  step:              { color: C.purple, fontWeight: "700", fontSize: 12 },
+  instrText:         { color: C.gray, fontSize: 13 },
+  instrBold:         { color: C.white, fontWeight: "700", fontSize: 13 },
+  numbersBox:        { borderRadius: 12, overflow: "hidden", borderWidth: 0.5,
+                       borderColor: "rgba(124,58,237,0.3)", marginVertical: 8 },
+  numbersHeader:     { backgroundColor: "rgba(124,58,237,0.12)", padding: 10 },
+  numbersHeaderTxt:  { color: C.purple, fontSize: 12, fontWeight: "700" },
+  numberRow:         { flexDirection: "row", justifyContent: "space-between",
+                       alignItems: "center", padding: 12, backgroundColor: C.bg },
+  networkLabel:      { color: C.grayDark, fontSize: 11 },
+  numberText:        { color: C.white, fontWeight: "800", fontSize: 16, letterSpacing: 1 },
+  // ── Upload ──
+  uploadLabel:       { color: C.gray, fontSize: 13, fontWeight: "600", marginBottom: 8 },
+  uploadZone:        { borderWidth: 2, borderStyle: "dashed", borderColor: C.grayDark,
+                       borderRadius: 14, padding: 24, alignItems: "center",
+                       marginBottom: 14, backgroundColor: "rgba(255,255,255,0.02)" },
+  uploadZoneDone:    { borderColor: C.green, backgroundColor: C.greenFade },
+  uploadIcon:        { fontSize: 36, marginBottom: 8 },
+  uploadText:        { color: C.gray, fontSize: 14 },
+  uploadHint:        { color: C.grayDark, fontSize: 11, marginTop: 4 },
+  preview:           { width: 120, height: 120, borderRadius: 12, marginBottom: 10 },
+  uploadDoneText:    { color: C.green, fontWeight: "700", fontSize: 14 },
+  uploadChangeText:  { color: C.grayDark, fontSize: 11, marginTop: 3 },
+  // ── Avertissement ──
+  warnBox:           { backgroundColor: C.yellowFade, borderRadius: 12, padding: 12,
+                       borderWidth: 0.5, borderColor: C.yellow, marginBottom: 20 },
+  warnText:          { color: C.yellow, fontSize: 12, lineHeight: 18 },
+  // ── Boutons ──
+  btnRow:            { flexDirection: "row", gap: 12, marginBottom: 16 },
+  cancelBtn:         { flex: 1, padding: 15, borderRadius: 12, borderWidth: 1,
+                       borderColor: C.border, alignItems: "center",
+                       justifyContent: "center" },
+  cancelBtnText:     { color: C.gray, fontWeight: "600", fontSize: 15 },
+  sendBtn:           { flex: 1, padding: 15, borderRadius: 12,
+                       backgroundColor: C.purple, alignItems: "center",
+                       justifyContent: "center" },
+  sendBtnOff:        { opacity: 0.4 },
+  sendBtnText:       { color: "#fff", fontWeight: "700", fontSize: 15 },
 });

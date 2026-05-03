@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator, RefreshControl, Alert,
+  Modal, TextInput, Animated, PanResponder,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
@@ -21,6 +22,107 @@ function getLvl(pts: number) {
   return                  { icon: "🌱", label: "Débutant",  color: C.gray   };
 }
 
+/* ── Composant modal d'avis avec étoiles ── */
+function ReviewModal({
+  visible, onClose, onSubmit,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (rating: number, comment: string) => Promise<void>;
+}) {
+  const [rating, setRating]   = useState(5);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!comment.trim()) {
+      Alert.alert("Champ requis", "Laisse un commentaire stp.");
+      return;
+    }
+    setSending(true);
+    try {
+      await onSubmit(rating, comment.trim());
+      setComment("");
+      setRating(5);
+      onClose();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={rm.overlay}>
+        <View style={rm.box}>
+          <Text style={rm.title}>⭐ Laisser un avis</Text>
+          <Text style={rm.sub}>Note cet organisateur</Text>
+
+          {/* Étoiles */}
+          <View style={rm.starsRow}>
+            {[1, 2, 3, 4, 5].map((s) => (
+              <TouchableOpacity key={s} onPress={() => setRating(s)} activeOpacity={0.7}>
+                <Text style={[rm.star, s <= rating && rm.starActive]}>★</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={rm.ratingLabel}>
+            {["", "Mauvais 😞", "Passable 😐", "Bien 🙂", "Très bien 😄", "Excellent 🤩"][rating]}
+          </Text>
+
+          {/* Zone de texte */}
+          <TextInput
+            style={rm.input}
+            placeholder="Ton commentaire..."
+            placeholderTextColor={C.grayDark}
+            value={comment}
+            onChangeText={setComment}
+            multiline
+            numberOfLines={3}
+            maxLength={300}
+          />
+          <Text style={rm.charCount}>{comment.length}/300</Text>
+
+          {/* Boutons */}
+          <View style={rm.btnRow}>
+            <TouchableOpacity style={rm.cancelBtn} onPress={onClose}>
+              <Text style={rm.cancelTxt}>Annuler</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[rm.submitBtn, sending && { opacity: 0.6 }]}
+              onPress={handleSubmit}
+              disabled={sending}
+            >
+              {sending
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={rm.submitTxt}>Envoyer ⭐</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const rm = StyleSheet.create({
+  overlay:     { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center", padding: 20 },
+  box:         { backgroundColor: C.bgCard, borderRadius: 20, padding: 24, width: "100%", borderWidth: 0.5, borderColor: C.border },
+  title:       { color: C.white, fontWeight: "800", fontSize: 18, textAlign: "center", marginBottom: 4 },
+  sub:         { color: C.gray, fontSize: 13, textAlign: "center", marginBottom: 16 },
+  starsRow:    { flexDirection: "row", justifyContent: "center", gap: 10, marginBottom: 8 },
+  star:        { fontSize: 36, color: C.border },
+  starActive:  { color: C.yellow },
+  ratingLabel: { color: C.yellow, textAlign: "center", fontSize: 13, fontWeight: "600", marginBottom: 16, height: 18 },
+  input:       { backgroundColor: C.bg, borderRadius: 12, padding: 14, color: C.white, fontSize: 14, minHeight: 90, borderWidth: 0.5, borderColor: C.border, textAlignVertical: "top" },
+  charCount:   { color: C.grayDark, fontSize: 11, textAlign: "right", marginTop: 4, marginBottom: 16 },
+  btnRow:      { flexDirection: "row", gap: 10 },
+  cancelBtn:   { flex: 1, paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderColor: C.border, alignItems: "center" },
+  cancelTxt:   { color: C.gray, fontWeight: "600" },
+  submitBtn:   { flex: 1, paddingVertical: 13, borderRadius: 12, backgroundColor: C.purple, alignItems: "center" },
+  submitTxt:   { color: "#fff", fontWeight: "700" },
+});
+
+/* ══════════════════════════════════════════════════════ */
 export default function UserProfileScreen() {
   const { id }                        = useLocalSearchParams<{ id: string }>();
   const { user: me }                  = useAuthStore();
@@ -30,6 +132,7 @@ export default function UserProfileScreen() {
   const [loading, setLoading]         = useState(true);
   const [refreshing, setRefreshing]   = useState(false);
   const [tab, setTab]                 = useState<"info"|"games"|"reviews">("info");
+  const [reviewModal, setReviewModal] = useState(false);
 
   const isMe = String(me?.id) === String(id);
 
@@ -51,19 +154,15 @@ export default function UserProfileScreen() {
 
   useEffect(() => { load(); }, [id]);
 
-  const handleReview = () => {
-    let rating = 5;
-    let comment = "";
-    Alert.prompt?.("⭐ Laisser un avis", "Ton commentaire :", async (text) => {
-      if (!text) return;
-      try {
-        await createReviewApi({ organizer_id: Number(id), rating, comment: text });
-        Alert.alert("✅ Avis envoyé !");
-        load();
-      } catch (err: any) {
-        Alert.alert("Erreur", err.response?.data?.message || "Erreur");
-      }
-    });
+  const handleReviewSubmit = async (rating: number, comment: string) => {
+    try {
+      await createReviewApi({ organizer_id: Number(id), rating, comment });
+      Alert.alert("✅ Avis envoyé !");
+      load();
+    } catch (err: any) {
+      Alert.alert("Erreur", err.response?.data?.message || "Erreur lors de l'envoi");
+      throw err;
+    }
   };
 
   const handleReport = () => {
@@ -100,11 +199,18 @@ export default function UserProfileScreen() {
   const nextPts = pts < 100 ? 100 : pts < 200 ? 200 : null;
   const progress = nextPts ? Math.min((pts / nextPts) * 100, 100) : 100;
   const avgRating = reviews.length
-    ? (reviews.reduce((s: number, r: any) => s + r.rating, 0) / reviews.length).toFixed(1)
+    ? (reviews.reduce((sum: number, r: any) => sum + r.rating, 0) / reviews.length).toFixed(1)
     : null;
 
   return (
     <SafeAreaView style={s.root}>
+      {/* ── Modal avis ── */}
+      <ReviewModal
+        visible={reviewModal}
+        onClose={() => setReviewModal(false)}
+        onSubmit={handleReviewSubmit}
+      />
+
       {/* Back */}
       <View style={s.topBar}>
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
@@ -172,11 +278,11 @@ export default function UserProfileScreen() {
         {/* Actions (si pas moi) */}
         {!isMe && (
           <View style={s.actionsRow}>
-            <Button label="💬 Défier"       onPress={() => router.push(`/chat/${profile.id}`)} style={{ flex: 1 }} />
+            <Button label="💬 Défier"   onPress={() => router.push(`/chat/${profile.id}`)} style={{ flex: 1 }} />
             {profile.role === "organizer" && (
-              <Button label="⭐ Avis"       onPress={handleReview} variant="outline" style={{ flex: 1 }} />
+              <Button label="⭐ Avis"   onPress={() => setReviewModal(true)} variant="outline" style={{ flex: 1 }} />
             )}
-            <Button label="🚨 Signaler"     onPress={handleReport} variant="danger"  style={{ flex: 1 }} />
+            <Button label="🚨 Signaler" onPress={handleReport} variant="danger" style={{ flex: 1 }} />
           </View>
         )}
 
@@ -216,21 +322,34 @@ export default function UserProfileScreen() {
           <Card style={s.card}>
             {userGames.length === 0 ? (
               <Text style={s.empty}>Ce joueur n'a pas encore de jeux</Text>
-            ) : userGames.map((g: any) => (
-              <View key={g.id || g.game_id} style={s.gameRow}>
-                <Text style={{ fontSize: 22 }}>🎮</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.gameName}>{g.name}</Text>
-                  <Text style={s.gameLevel}>{g.level || "beginner"}</Text>
+            ) : userGames.map((g: any, index: number) => (
+              // ✅ FIX: clé unique combinant id + index pour éviter les doublons
+              <TouchableOpacity
+                key={`game-${g.id ?? g.game_id ?? index}-${index}`}
+                onPress={() => g.id && router.push(`/game/${g.id}`)}
+                activeOpacity={g.id ? 0.75 : 1}
+              >
+                <View style={s.gameRow}>
+                  <Text style={{ fontSize: 22 }}>🎮</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.gameName}>{g.name}</Text>
+                    <Text style={s.gameLevel}>{g.level || "beginner"}</Text>
+                  </View>
+                  <Text style={s.gamePts}>{g.points || 0} pts</Text>
                 </View>
-                <Text style={s.gamePts}>{g.points || 0} pts</Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </Card>
         )}
 
         {tab === "reviews" && (
           <Card style={[s.card, { marginBottom: 32 }]}>
+            {/* Bouton laisser un avis si pas moi et organisateur */}
+            {!isMe && profile.role === "organizer" && (
+              <TouchableOpacity style={s.leaveReviewBtn} onPress={() => setReviewModal(true)}>
+                <Text style={s.leaveReviewTxt}>✍️ Laisser un avis</Text>
+              </TouchableOpacity>
+            )}
             {reviews.length === 0 ? (
               <Text style={s.empty}>Aucun avis pour l'instant</Text>
             ) : reviews.map((r: any) => (
@@ -242,7 +361,10 @@ export default function UserProfileScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.reviewName}>{r.username}</Text>
-                  <Text style={{ color: C.yellow, fontSize: 12 }}>{"⭐".repeat(Math.min(r.rating || 0, 5))}</Text>
+                  <Text style={{ color: C.yellow, fontSize: 14, letterSpacing: 1 }}>
+                    {"★".repeat(Math.min(r.rating || 0, 5))}
+                    {"☆".repeat(Math.max(0, 5 - (r.rating || 0)))}
+                  </Text>
                   {r.comment && <Text style={s.reviewComment}>{r.comment}</Text>}
                 </View>
               </View>
@@ -255,49 +377,51 @@ export default function UserProfileScreen() {
 }
 
 const s = StyleSheet.create({
-  root:       { flex: 1, backgroundColor: C.bg },
-  topBar:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, paddingBottom: 8 },
-  backBtn:    { width: 36, height: 36, borderRadius: 18, backgroundColor: C.bgCard, justifyContent: "center", alignItems: "center", borderWidth: 0.5, borderColor: C.border },
-  backText:   { color: C.purple, fontSize: 18, fontWeight: "700" },
-  topTitle:   { color: C.white, fontWeight: "700", fontSize: 16, flex: 1, textAlign: "center" },
-  content:    { padding: 16 },
-  hero:       { flexDirection: "row", gap: 14, alignItems: "flex-start", backgroundColor: C.bgCard, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 0.5, borderColor: C.border },
-  avatar:     { width: 56, height: 56, borderRadius: 28, backgroundColor: C.purple, justifyContent: "center", alignItems: "center", flexShrink: 0 },
-  avatarText: { color: "#fff", fontWeight: "900", fontSize: 22 },
-  nameRow:    { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 },
-  username:   { color: C.white, fontWeight: "800", fontSize: 17 },
-  lvlBadge:   { borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 },
-  lvlText:    { fontSize: 11, fontWeight: "700" },
-  roleBadge:  { backgroundColor: C.cyanFade, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start", marginBottom: 4 },
-  roleText:   { color: C.cyan, fontSize: 11, fontWeight: "600" },
-  city:       { color: C.gray, fontSize: 12, marginBottom: 2 },
-  bio:        { color: C.gray, fontSize: 12, fontStyle: "italic", marginBottom: 2 },
-  rating:     { color: C.yellow, fontSize: 12 },
-  card:       { marginBottom: 12 },
-  xpBg:       { height: 6, backgroundColor: C.border, borderRadius: 99, overflow: "hidden" },
-  xpFill:     { height: 6, backgroundColor: C.purple, borderRadius: 99 },
-  statsRow:   { flexDirection: "row", gap: 10, marginBottom: 12 },
-  statCard:   { flex: 1, alignItems: "center", paddingVertical: 14 },
-  statIcon:   { fontSize: 20, marginBottom: 4 },
-  statValue:  { fontSize: 18, fontWeight: "800", color: C.white },
-  statLabel:  { fontSize: 10, color: C.gray, marginTop: 2 },
-  actionsRow: { flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" },
-  tabs:       { flexDirection: "row", backgroundColor: C.bgCard, borderRadius: 12, padding: 4, marginBottom: 12, borderWidth: 0.5, borderColor: C.border },
-  tab:        { flex: 1, paddingVertical: 9, alignItems: "center", borderRadius: 9 },
-  tabActive:  { backgroundColor: C.purpleFade },
-  tabText:    { color: C.gray, fontSize: 11, fontWeight: "600" },
-  tabTextActive:{ color: C.purple },
-  infoRow:    { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 10, borderBottomWidth: 0.5, borderColor: C.border },
-  infoIcon:   { fontSize: 18, marginTop: 2 },
-  infoLabel:  { color: C.gray, fontSize: 11, marginBottom: 2 },
-  infoValue:  { color: C.white, fontSize: 13, fontWeight: "500", textTransform: "capitalize" },
-  gameRow:    { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 0.5, borderColor: C.border },
-  gameName:   { color: C.white, fontWeight: "600", fontSize: 13 },
-  gameLevel:  { color: C.gray, fontSize: 11, marginTop: 1, textTransform: "capitalize" },
-  gamePts:    { color: C.purple, fontWeight: "700", fontSize: 13 },
-  reviewRow:  { flexDirection: "row", gap: 10, paddingVertical: 10, borderBottomWidth: 0.5, borderColor: C.border },
-  reviewAvatar:{ width: 32, height: 32, borderRadius: 16, backgroundColor: C.purple, justifyContent: "center", alignItems: "center" },
-  reviewName: { color: C.white, fontWeight: "600", fontSize: 13, marginBottom: 2 },
-  reviewComment:{ color: C.gray, fontSize: 12, marginTop: 4 },
-  empty:      { color: C.gray, textAlign: "center", paddingVertical: 20 },
+  root:          { flex: 1, backgroundColor: C.bg },
+  topBar:        { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, paddingBottom: 8 },
+  backBtn:       { width: 36, height: 36, borderRadius: 18, backgroundColor: C.bgCard, justifyContent: "center", alignItems: "center", borderWidth: 0.5, borderColor: C.border },
+  backText:      { color: C.purple, fontSize: 18, fontWeight: "700" },
+  topTitle:      { color: C.white, fontWeight: "700", fontSize: 16, flex: 1, textAlign: "center" },
+  content:       { padding: 16 },
+  hero:          { flexDirection: "row", gap: 14, alignItems: "flex-start", backgroundColor: C.bgCard, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 0.5, borderColor: C.border },
+  avatar:        { width: 56, height: 56, borderRadius: 28, backgroundColor: C.purple, justifyContent: "center", alignItems: "center", flexShrink: 0 },
+  avatarText:    { color: "#fff", fontWeight: "900", fontSize: 22 },
+  nameRow:       { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 },
+  username:      { color: C.white, fontWeight: "800", fontSize: 17 },
+  lvlBadge:      { borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 },
+  lvlText:       { fontSize: 11, fontWeight: "700" },
+  roleBadge:     { backgroundColor: C.cyanFade, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start", marginBottom: 4 },
+  roleText:      { color: C.cyan, fontSize: 11, fontWeight: "600" },
+  city:          { color: C.gray, fontSize: 12, marginBottom: 2 },
+  bio:           { color: C.gray, fontSize: 12, fontStyle: "italic", marginBottom: 2 },
+  rating:        { color: C.yellow, fontSize: 12 },
+  card:          { marginBottom: 12 },
+  xpBg:          { height: 6, backgroundColor: C.border, borderRadius: 99, overflow: "hidden" },
+  xpFill:        { height: 6, backgroundColor: C.purple, borderRadius: 99 },
+  statsRow:      { flexDirection: "row", gap: 10, marginBottom: 12 },
+  statCard:      { flex: 1, alignItems: "center", paddingVertical: 14 },
+  statIcon:      { fontSize: 20, marginBottom: 4 },
+  statValue:     { fontSize: 18, fontWeight: "800", color: C.white },
+  statLabel:     { fontSize: 10, color: C.gray, marginTop: 2 },
+  actionsRow:    { flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" },
+  tabs:          { flexDirection: "row", backgroundColor: C.bgCard, borderRadius: 12, padding: 4, marginBottom: 12, borderWidth: 0.5, borderColor: C.border },
+  tab:           { flex: 1, paddingVertical: 9, alignItems: "center", borderRadius: 9 },
+  tabActive:     { backgroundColor: C.purpleFade },
+  tabText:       { color: C.gray, fontSize: 11, fontWeight: "600" },
+  tabTextActive: { color: C.purple },
+  infoRow:       { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 10, borderBottomWidth: 0.5, borderColor: C.border },
+  infoIcon:      { fontSize: 18, marginTop: 2 },
+  infoLabel:     { color: C.gray, fontSize: 11, marginBottom: 2 },
+  infoValue:     { color: C.white, fontSize: 13, fontWeight: "500", textTransform: "capitalize" },
+  gameRow:       { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 0.5, borderColor: C.border },
+  gameName:      { color: C.white, fontWeight: "600", fontSize: 13 },
+  gameLevel:     { color: C.gray, fontSize: 11, marginTop: 1, textTransform: "capitalize" },
+  gamePts:       { color: C.purple, fontWeight: "700", fontSize: 13 },
+  leaveReviewBtn:{ backgroundColor: C.purpleFade, borderRadius: 12, paddingVertical: 11, alignItems: "center", marginBottom: 12 },
+  leaveReviewTxt:{ color: C.purple, fontWeight: "700", fontSize: 13 },
+  reviewRow:     { flexDirection: "row", gap: 10, paddingVertical: 10, borderBottomWidth: 0.5, borderColor: C.border },
+  reviewAvatar:  { width: 32, height: 32, borderRadius: 16, backgroundColor: C.purple, justifyContent: "center", alignItems: "center" },
+  reviewName:    { color: C.white, fontWeight: "600", fontSize: 13, marginBottom: 2 },
+  reviewComment: { color: C.gray, fontSize: 12, marginTop: 4 },
+  empty:         { color: C.gray, textAlign: "center", paddingVertical: 20 },
 });

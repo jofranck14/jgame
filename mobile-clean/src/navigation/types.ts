@@ -23,9 +23,10 @@ export type GameStackParamList = {
 };
 
 export type ProfileStackParamList = {
-  MyProfile:    undefined;
-  UserProfile:  { id: number };
-  Matchmaking:  undefined;
-  Notifications:undefined;
-  Chat:         { userId: number; username: string };
+  MyProfile:     undefined;
+  UserProfile:   { id: number };
+  Matchmaking:   undefined;
+  Notifications: undefined;
+  ChatList:      undefined;
+  Chat:          { userId: number; username: string };
 };

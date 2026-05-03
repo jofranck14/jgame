@@ -17,7 +17,6 @@ app.use(cors(env.CORS_OPTIONS));
 app.use(morgan(env.MORGAN_FORMAT));
 
 app.use(express.json({ limit: "1mb" }));
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/v1", apiV1Router);

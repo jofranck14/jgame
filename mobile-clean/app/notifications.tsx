@@ -18,9 +18,44 @@ const ICONS: Record<string, string> = {
   system:     "📢",
 };
 
+/**
+ * Normalise les liens produits par le backend vers les routes Expo Router.
+ *
+ * Backend génère :  "/tournaments/5"  "/games/3"  "/admin"  null
+ * Expo Router :     "/tournament/5"   "/game/3"   null      → pas de nav
+ */
+function resolveLink(link: string | null | undefined): string | null {
+  if (!link) return null;
+
+  // /tournaments/:id  → /tournament/:id
+  const tMatch = link.match(/^\/tournaments\/(\d+)/);
+  if (tMatch) return `/tournament/${tMatch[1]}`;
+
+  // /games/:id  → /game/:id
+  const gMatch = link.match(/^\/games\/(\d+)/);
+  if (gMatch) return `/game/${gMatch[1]}`;
+
+  // /profile/:id
+  const pMatch = link.match(/^\/profile\/(\d+)/);
+  if (pMatch) return `/profile/${pMatch[1]}`;
+
+  // /chat/:id
+  const cMatch = link.match(/^\/chat\/(\d+)/);
+  if (cMatch) return `/chat/${cMatch[1]}`;
+
+  // /admin  → on n'a pas cette page côté mobile, on ignore
+  if (link.startsWith("/admin")) return null;
+
+  // Si c'est déjà un path Expo valide connu, on le passe tel quel
+  const knownPrefixes = ["/tournament/", "/game/", "/profile/", "/chat/", "/notifications"];
+  if (knownPrefixes.some((p) => link.startsWith(p))) return link;
+
+  return null;
+}
+
 export default function NotificationsScreen() {
-  const [notifs, setNotifs]       = useState<any[]>([]);
-  const [loading, setLoading]     = useState(true);
+  const [notifs, setNotifs]         = useState<any[]>([]);
+  const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = async () => {
@@ -33,11 +68,16 @@ export default function NotificationsScreen() {
 
   useEffect(() => { load(); }, []);
 
-  const markRead = async (id: number) => {
-    try {
-      await markNotifReadApi(id);
-      setNotifs((prev) => prev.map((n) => n.id === id ? { ...n, is_read: true } : n));
-    } catch {}
+  const handlePress = async (n: any) => {
+    // 1. Marquer comme lu
+    try { await markNotifReadApi(n.id); } catch {}
+    setNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x));
+
+    // 2. Naviguer si un lien valide existe
+    const dest = resolveLink(n.link);
+    if (dest) {
+      router.push(dest as any);
+    }
   };
 
   const markAll = async () => {
@@ -78,37 +118,54 @@ export default function NotificationsScreen() {
       ) : (
         <ScrollView
           contentContainerStyle={s.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={C.purple} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(); }}
+              tintColor={C.purple}
+            />
+          }
         >
           {notifs.length === 0 ? (
             <View style={s.empty}>
               <Text style={{ fontSize: 52, marginBottom: 12 }}>🔔</Text>
               <Text style={s.emptyTitle}>Aucune notification</Text>
-              <Text style={s.emptySub}>Tu seras notifié des tournois, paiements et résultats ici</Text>
+              <Text style={s.emptySub}>
+                Tu seras notifié des tournois, paiements et résultats ici
+              </Text>
             </View>
-          ) : notifs.map((n) => (
-            <TouchableOpacity
-              key={n.id}
-              onPress={() => { markRead(n.id); if (n.link) router.push(n.link); }}
-              activeOpacity={0.8}
-            >
-              <View style={[s.notifRow, n.is_read && s.notifRead]}>
-                <View style={s.notifIcon}>
-                  <Text style={{ fontSize: 22 }}>{ICONS[n.type] || "📢"}</Text>
+          ) : notifs.map((n) => {
+            const dest = resolveLink(n.link);
+            const isClickable = !!dest;
+            return (
+              <TouchableOpacity
+                key={n.id}
+                onPress={() => handlePress(n)}
+                activeOpacity={isClickable ? 0.8 : 0.95}
+              >
+                <View style={[s.notifRow, n.is_read && s.notifRead]}>
+                  <View style={s.notifIcon}>
+                    <Text style={{ fontSize: 22 }}>{ICONS[n.type] || "📢"}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.notifTitle, n.is_read && { color: C.gray }]}>
+                      {n.title || n.message}
+                    </Text>
+                    {n.title && n.message && (
+                      <Text style={s.notifMsg} numberOfLines={2}>{n.message}</Text>
+                    )}
+                    <View style={s.notifFooter}>
+                      <Text style={s.notifTime}>{fromNow(n.created_at)}</Text>
+                      {isClickable && !n.is_read && (
+                        <Text style={s.tapHint}>Appuie pour voir →</Text>
+                      )}
+                    </View>
+                  </View>
+                  {!n.is_read && <View style={s.unreadDot} />}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.notifTitle, n.is_read && { color: C.gray }]}>
-                    {n.title || n.message}
-                  </Text>
-                  {n.title && n.message && (
-                    <Text style={s.notifMsg} numberOfLines={2}>{n.message}</Text>
-                  )}
-                  <Text style={s.notifTime}>{fromNow(n.created_at)}</Text>
-                </View>
-                {!n.is_read && <View style={s.unreadDot} />}
-              </View>
-            </TouchableOpacity>
-          ))}
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -129,7 +186,9 @@ const s = StyleSheet.create({
   notifIcon:  { width: 44, height: 44, borderRadius: 22, backgroundColor: C.purpleFade, justifyContent: "center", alignItems: "center" },
   notifTitle: { color: C.white, fontWeight: "600", fontSize: 14, marginBottom: 3 },
   notifMsg:   { color: C.gray, fontSize: 12, lineHeight: 17, marginBottom: 4 },
+  notifFooter:{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   notifTime:  { color: C.grayDark, fontSize: 11 },
+  tapHint:    { color: C.purple, fontSize: 10, fontWeight: "600" },
   unreadDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: C.purple, marginTop: 4 },
   empty:      { alignItems: "center", paddingVertical: 80 },
   emptyTitle: { color: C.white, fontSize: 18, fontWeight: "700", marginBottom: 8 },

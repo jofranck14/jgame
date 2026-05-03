@@ -47,4 +47,43 @@ async function getConversation(user1_id, user2_id, limit = 50) {
   return rows.reverse();
 }
 
-module.exports = { saveMessage, getConversation };
+/**
+ * Retourne la liste des conversations d'un utilisateur :
+ * une ligne par interlocuteur distinct, avec le dernier message
+ * et le nombre de messages non lus.
+ */
+async function getConversations(userId) {
+  const [rows] = await pool.execute(
+    `SELECT
+        other.id          AS user_id,
+        other.username    AS username,
+        last_msg.message  AS last_message,
+        last_msg.created_at AS last_at,
+        (
+          SELECT COUNT(*)
+          FROM messages unread
+          WHERE unread.sender_id   = other.id
+            AND unread.receiver_id = ?
+            AND unread.is_read     = 0
+        ) AS unread
+      FROM (
+        SELECT
+          CASE
+            WHEN m.sender_id   = ? THEN m.receiver_id
+            ELSE m.sender_id
+          END AS other_id,
+          MAX(m.id) AS last_id
+        FROM messages m
+        WHERE m.sender_id = ? OR m.receiver_id = ?
+        GROUP BY other_id
+      ) AS convs
+      JOIN users other          ON other.id = convs.other_id
+      JOIN messages last_msg    ON last_msg.id = convs.last_id
+      ORDER BY convs.last_id DESC`,
+    [userId, userId, userId, userId],
+  );
+
+  return rows;
+}
+
+module.exports = { saveMessage, getConversation, getConversations };

@@ -2,12 +2,14 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, KeyboardAvoidingView, Platform, ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import { C } from "../../src/theme/colors";
 import { useAuthStore } from "../../src/store/authStore";
 import api, { BASE_URL } from "../../src/api/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { io, Socket } from "socket.io-client";
 
 interface Msg {
@@ -21,121 +23,149 @@ interface Msg {
 export default function ChatScreen() {
   const { userId }              = useLocalSearchParams<{ userId: string }>();
   const { user: me }            = useAuthStore();
+  const otherId                 = Number(userId);
+
   const [messages, setMessages] = useState<Msg[]>([]);
   const [text, setText]         = useState("");
   const [loading, setLoading]   = useState(true);
   const [sending, setSending]   = useState(false);
   const [otherUser, setOther]   = useState<any>(null);
-  const [connected, setConnected] = useState(false);
-  const socketRef               = useRef<Socket | null>(null);
-  const listRef                 = useRef<FlatList>(null);
+  const [online, setOnline]     = useState(false);
+
+  const socketRef    = useRef<Socket | null>(null);
+  const listRef      = useRef<FlatList>(null);
+  const seenIds      = useRef<Set<number>>(new Set());
 
   const scrollToBottom = useCallback(() => {
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 150);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
   }, []);
 
+  // Ajoute un message sans doublon
+  const addMessage = useCallback((msg: Msg) => {
+    if (seenIds.current.has(msg.id)) return;
+    seenIds.current.add(msg.id);
+    setMessages((prev) => [...prev, msg]);
+    scrollToBottom();
+  }, [scrollToBottom]);
+
+  // ── Charger historique + infos user ──────────────────
   useEffect(() => {
+    let mounted = true;
     const load = async () => {
       try {
         const [histRes, userRes] = await Promise.all([
-          api.get(`/chat/${userId}`),
-          api.get(`/users/${userId}`),
+          api.get(`/chat/${otherId}`),
+          api.get(`/users/${otherId}`),
         ]);
-        setMessages(histRes.data?.messages || histRes.data || []);
+        if (!mounted) return;
+        const msgs: Msg[] = histRes.data?.messages || histRes.data || [];
+        msgs.forEach((m) => seenIds.current.add(m.id));
+        setMessages(msgs);
         setOther(userRes.data?.user || userRes.data);
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 200);
       } catch (e) {
         console.error("Chat load error:", e);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
     load();
+    return () => { mounted = false; };
+  }, [otherId]);
 
-    // Connexion Socket.io
+  // ── Socket.io ─────────────────────────────────────────
+  useEffect(() => {
+    let mounted = true;
     const socketUrl = BASE_URL.replace("/api/v1", "");
-    const socket = io(socketUrl, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      timeout: 10000,
-    });
-    socketRef.current = socket;
 
-    socket.on("connect", () => {
-      setConnected(true);
-      socket.emit("joinConversation", {
-        userId:      me?.id,
-        otherUserId: Number(userId),
+    const connect = async () => {
+      // Récupérer le token depuis AsyncStorage
+      const token = await AsyncStorage.getItem("jgame_token");
+
+      const socket = io(socketUrl, {
+        // ← Token passé dans auth (lu par le middleware backend)
+        auth:        { token: token ?? "" },
+        transports:  ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay:    1000,
+        timeout:     15000,
       });
-    });
+      socketRef.current = socket;
 
-    socket.on("disconnect", () => setConnected(false));
-
-    socket.on("receiveMessage", (msg: Msg) => {
-      setMessages((prev) => {
-        // Éviter les doublons
-        if (prev.find((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
+      socket.on("connect", () => {
+        if (!mounted) return;
+        // Rejoindre la room de conversation
+        socket.emit("joinConversation", { other_user_id: otherId });
+        // Demander le statut de l'autre user
+        socket.emit("checkStatus", { userId: otherId });
       });
-      scrollToBottom();
-    });
 
-    socket.on("connect_error", (err) => {
-      console.log("Socket error:", err.message);
-    });
+      socket.on("userStatus", ({ userId: uid, online: on }: any) => {
+        if (Number(uid) === otherId && mounted) setOnline(on);
+      });
+      socket.on("userOnline", ({ userId: uid }: any) => {
+        if (Number(uid) === otherId && mounted) setOnline(true);
+      });
+      socket.on("userOffline", ({ userId: uid }: any) => {
+        if (Number(uid) === otherId && mounted) setOnline(false);
+      });
+
+      socket.on("receiveMessage", (msg: Msg) => {
+        if (!mounted) return;
+        const isRelevant =
+          (msg.sender_id === me?.id   && msg.receiver_id === otherId) ||
+          (msg.sender_id === otherId  && msg.receiver_id === me?.id);
+        if (isRelevant) addMessage(msg);
+      });
+
+      socket.on("connect_error", (err) => {
+        console.warn("Socket error:", err.message);
+      });
+    };
+
+    connect();
 
     return () => {
-      socket.disconnect();
+      mounted = false;
+      socketRef.current?.disconnect();
+      socketRef.current = null;
     };
-  }, [userId, me?.id]);
+  }, [otherId, me?.id, addMessage]);
 
-// Dans sendMsg, remplace le fallback HTTP par un envoi optimiste
-const sendMsg = async () => {
-  const trimmed = text.trim();
-  if (!trimmed || sending) return;
-  setSending(true);
-  setText("");
+  // ── Envoyer un message ────────────────────────────────
+  const sendMsg = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setText("");
 
-  // Message optimiste côté client
-  const tempMsg: Msg = {
-    id: Date.now(), // ID temporaire
-    sender_id: me?.id || 0,
-    receiver_id: Number(userId),
-    message: trimmed,
-    created_at: new Date().toISOString(),
+    try {
+      if (socketRef.current?.connected) {
+        // ← Champs corrects attendus par le backend
+        socketRef.current.emit("sendMessage", {
+          receiver_id: otherId,
+          message:     trimmed,
+        });
+      } else {
+        // Fallback HTTP — POST /chat/send n'existe pas,
+        // on passe par un message optimiste et on relance le socket
+        Alert.alert(
+          "Connexion perdue",
+          "Le socket est déconnecté. Vérifie ta connexion et réessaie.",
+        );
+        setText(trimmed);
+      }
+    } catch (err: any) {
+      console.error("Send error:", err);
+      setText(trimmed);
+      Alert.alert("Erreur", "Impossible d'envoyer le message.");
+    } finally {
+      setSending(false);
+    }
   };
 
-  setMessages((prev) => [...prev, tempMsg]);
-  scrollToBottom();
-
-  try {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit("sendMessage", {
-        senderId:   me?.id,
-        receiverId: Number(userId),
-        message:    trimmed,
-      });
-    } else {
-      // Socket déconnecté — réessayer la connexion
-      Alert.alert(
-        "Connexion perdue",
-        "Le chat n'est pas connecté. Vérifie que le backend tourne sur 192.168.43.66:5000",
-        [{ text: "OK" }]
-      );
-      // Retirer le message optimiste
-      setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
-      setText(trimmed);
-    }
-  } catch {
-    setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
-    setText(trimmed);
-  } finally {
-    setSending(false);
-  }
-};
-
+  // ── Rendu d'un message ────────────────────────────────
   const renderMsg = ({ item }: { item: Msg }) => {
     const isMe = item.sender_id === me?.id;
     return (
@@ -148,7 +178,9 @@ const sendMsg = async () => {
           </View>
         )}
         <View style={[s.bubble, isMe ? s.bubbleMe : s.bubbleOther]}>
-          <Text style={[s.bubbleTxt, isMe && { color: "#fff" }]}>{item.message}</Text>
+          <Text style={[s.bubbleTxt, isMe && { color: "#fff" }]}>
+            {item.message}
+          </Text>
         </View>
       </View>
     );
@@ -156,31 +188,36 @@ const sendMsg = async () => {
 
   return (
     <SafeAreaView style={s.root}>
-      {/* Header */}
+      {/* ── Header ── */}
       <View style={s.header}>
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
           <Text style={s.backTxt}>←</Text>
         </TouchableOpacity>
+
         <View style={s.headerAvatar}>
           <Text style={s.headerAvatarTxt}>
             {otherUser?.username?.[0]?.toUpperCase() || "?"}
           </Text>
+          <View style={[s.onlineDot, { backgroundColor: online ? C.green : C.grayDark }]} />
         </View>
+
         <View style={{ flex: 1 }}>
           <Text style={s.headerName}>{otherUser?.username || `Joueur #${userId}`}</Text>
-          <Text style={s.headerSub}>
-            {connected ? "🟢 Connecté" : "⚪ Hors ligne"}
+          <Text style={[s.headerSub, { color: online ? C.green : C.gray }]}>
+            {online ? "🟢 En ligne" : "⚪ Hors ligne"}
           </Text>
         </View>
+
         <TouchableOpacity onPress={() => router.push(`/profile/${userId}`)}>
           <Text style={s.profileLink}>Profil</Text>
         </TouchableOpacity>
       </View>
 
+      {/* ── Corps ── */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
         {loading ? (
           <View style={s.center}>
@@ -190,20 +227,26 @@ const sendMsg = async () => {
           <FlatList
             ref={listRef}
             data={messages}
-            keyExtractor={(m, i) => `msg-${m.id}-${i}`}
+            // ← Clé unique = id → jamais de doublon key="11"
+            keyExtractor={(m) => String(m.id)}
             renderItem={renderMsg}
-            contentContainerStyle={s.msgList}
-            onContentSizeChange={scrollToBottom}
+            contentContainerStyle={[
+              s.msgList,
+              messages.length === 0 && { flex: 1 },
+            ]}
             ListEmptyComponent={
               <View style={s.empty}>
-                <Text style={{ fontSize: 40, marginBottom: 8 }}>💬</Text>
-                <Text style={s.emptyTxt}>Commence la conversation !</Text>
+                <Text style={{ fontSize: 44, marginBottom: 12 }}>💬</Text>
+                <Text style={s.emptyTxt}>Aucun message pour l'instant</Text>
+                <Text style={{ color: C.grayDark, fontSize: 12, marginTop: 4 }}>
+                  Commence la conversation !
+                </Text>
               </View>
             }
           />
         )}
 
-        {/* Input */}
+        {/* ── Saisie ── */}
         <View style={s.inputRow}>
           <TextInput
             style={s.input}
@@ -214,16 +257,19 @@ const sendMsg = async () => {
             multiline
             maxLength={500}
             returnKeyType="send"
-            onSubmitEditing={sendMsg}
             blurOnSubmit={false}
+            onSubmitEditing={sendMsg}
           />
           <TouchableOpacity
-            style={[s.sendBtn, (!text.trim() || sending) && { opacity: 0.4 }]}
+            style={[s.sendBtn, (!text.trim() || sending) && s.sendBtnOff]}
             onPress={sendMsg}
             disabled={!text.trim() || sending}
-            activeOpacity={0.7}
+            activeOpacity={0.75}
           >
-            <Text style={s.sendIcon}>➤</Text>
+            {sending
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={s.sendIcon}>➤</Text>
+            }
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -233,28 +279,41 @@ const sendMsg = async () => {
 
 const s = StyleSheet.create({
   root:            { flex: 1, backgroundColor: C.bg },
-  header:          { flexDirection: "row", alignItems: "center", gap: 10, padding: 16, paddingBottom: 12, borderBottomWidth: 0.5, borderColor: C.border },
-  backBtn:         { width: 36, height: 36, borderRadius: 18, backgroundColor: C.bgCard, justifyContent: "center", alignItems: "center" },
+  header:          { flexDirection: "row", alignItems: "center", gap: 10,
+                     paddingHorizontal: 16, paddingVertical: 12,
+                     borderBottomWidth: 0.5, borderColor: C.border },
+  backBtn:         { width: 36, height: 36, borderRadius: 18, backgroundColor: C.bgCard,
+                     justifyContent: "center", alignItems: "center" },
   backTxt:         { color: C.purple, fontSize: 18, fontWeight: "700" },
-  headerAvatar:    { width: 38, height: 38, borderRadius: 19, backgroundColor: C.purple, justifyContent: "center", alignItems: "center" },
-  headerAvatarTxt: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  headerAvatar:    { width: 40, height: 40, borderRadius: 20, backgroundColor: C.purple,
+                     justifyContent: "center", alignItems: "center", position: "relative" },
+  headerAvatarTxt: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  onlineDot:       { position: "absolute", bottom: 0, right: 0, width: 11, height: 11,
+                     borderRadius: 6, borderWidth: 2, borderColor: C.bg },
   headerName:      { color: C.white, fontWeight: "700", fontSize: 15 },
-  headerSub:       { color: C.gray, fontSize: 11, marginTop: 1 },
+  headerSub:       { fontSize: 11, marginTop: 1 },
   profileLink:     { color: C.purple, fontSize: 13, fontWeight: "600" },
   center:          { flex: 1, justifyContent: "center", alignItems: "center" },
-  msgList:         { padding: 16, flexGrow: 1 },
+  msgList:         { padding: 16, paddingBottom: 8 },
   msgRow:          { flexDirection: "row", alignItems: "flex-end", gap: 8, marginBottom: 10 },
   msgRowMe:        { flexDirection: "row-reverse" },
-  msgAvatar:       { width: 28, height: 28, borderRadius: 14, backgroundColor: C.purple, justifyContent: "center", alignItems: "center" },
+  msgAvatar:       { width: 30, height: 30, borderRadius: 15, backgroundColor: C.purple,
+                     justifyContent: "center", alignItems: "center" },
   msgAvatarTxt:    { color: "#fff", fontWeight: "700", fontSize: 11 },
-  bubble:          { maxWidth: "75%", borderRadius: 16, padding: 10, paddingHorizontal: 14 },
+  bubble:          { maxWidth: "75%", borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleOther:     { backgroundColor: C.bgCard, borderBottomLeftRadius: 4 },
   bubbleMe:        { backgroundColor: C.purple, borderBottomRightRadius: 4 },
   bubbleTxt:       { color: C.white, fontSize: 14, lineHeight: 20 },
-  inputRow:        { flexDirection: "row", alignItems: "flex-end", gap: 10, padding: 12, paddingTop: 8, borderTopWidth: 0.5, borderColor: C.border, backgroundColor: C.bgCard },
-  input:           { flex: 1, backgroundColor: C.bg, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: C.white, fontSize: 14, maxHeight: 100, borderWidth: 0.5, borderColor: C.border },
-  sendBtn:         { width: 44, height: 44, borderRadius: 22, backgroundColor: C.purple, justifyContent: "center", alignItems: "center" },
+  inputRow:        { flexDirection: "row", alignItems: "flex-end", gap: 10,
+                     paddingHorizontal: 12, paddingVertical: 10,
+                     borderTopWidth: 0.5, borderColor: C.border, backgroundColor: C.bgCard },
+  input:           { flex: 1, backgroundColor: C.bg, borderRadius: 22,
+                     paddingHorizontal: 16, paddingVertical: 10, color: C.white,
+                     fontSize: 14, maxHeight: 100, borderWidth: 0.5, borderColor: C.border },
+  sendBtn:         { width: 44, height: 44, borderRadius: 22, backgroundColor: C.purple,
+                     justifyContent: "center", alignItems: "center" },
+  sendBtnOff:      { opacity: 0.35 },
   sendIcon:        { color: "#fff", fontSize: 16 },
-  empty:           { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60 },
-  emptyTxt:        { color: C.gray, fontSize: 15 },
+  empty:           { flex: 1, justifyContent: "center", alignItems: "center", paddingBottom: 60 },
+  emptyTxt:        { color: C.gray, fontSize: 16, fontWeight: "600" },
 });
