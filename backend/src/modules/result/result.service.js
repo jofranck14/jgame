@@ -123,6 +123,7 @@ async function getTournamentResults(tournament_id) {
 }
 
 async function getGlobalLeaderboard(limit = 20) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
   const [rows] = await pool.execute(
     `SELECT
         id AS user_id,
@@ -135,14 +136,15 @@ async function getGlobalLeaderboard(limit = 20) {
           ELSE 'beginner'
         END AS level
       FROM users
+      WHERE is_banned = 0
       ORDER BY points DESC
-      LIMIT ?`,
-    [limit],
+      LIMIT ${safeLimit}`,
   );
   return rows;
 }
 
 async function getGameLeaderboard(game_id, limit = 20) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
   const [rows] = await pool.execute(
     `SELECT
         u.id AS user_id,
@@ -160,8 +162,8 @@ async function getGameLeaderboard(game_id, limit = 20) {
       JOIN users u ON u.id = ugs.user_id
       WHERE ugs.game_id = ?
       ORDER BY ugs.points DESC
-      LIMIT ?`,
-    [game_id, limit],
+      LIMIT ${safeLimit}`,
+    [game_id],
   );
   return rows;
 }
