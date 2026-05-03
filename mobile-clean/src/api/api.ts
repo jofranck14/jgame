@@ -2,7 +2,7 @@ import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // ⚠️ Remplace par l'IP locale de ton PC (ipconfig → IPv4)
-export const BASE_URL = "http://192.168.43.66:5000/api/v1";
+export const BASE_URL = "https://backend-production-79ce.up.railway.app/api/v1";
 
 const api = axios.create({
   baseURL: BASE_URL,
