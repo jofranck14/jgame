@@ -203,7 +203,7 @@ export default function Profile() {
               style={{ cursor: isMe ? "pointer" : "default" }}
               onClick={isMe ? () => setEditModal(true) : undefined}>
               {profile.avatar
-                ? <img src={`http://localhost:5000/uploads/${profile.avatar}`} alt="avatar"
+                ? <img src={profile.avatar} alt="avatar"
                     className="w-20 h-20 rounded-2xl object-cover border-2 border-purple-500/40" />
                 : <div className="w-20 h-20 rounded-2xl flex items-center justify-center text-white text-3xl font-bold"
                     style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)" }}>
@@ -461,7 +461,7 @@ export default function Profile() {
               {avatarPreview
                 ? <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
                 : profile.avatar
-                  ? <img src={`http://localhost:5000/uploads/${profile.avatar}`} alt="" className="w-full h-full object-cover" />
+                  ? <img src={profile.avatar} alt="" className="w-full h-full object-cover" />
                   : profile.username?.[0]?.toUpperCase()
               }
             </div>

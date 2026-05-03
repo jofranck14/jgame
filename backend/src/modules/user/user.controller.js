@@ -8,7 +8,7 @@ async function getMe(req, res, next) {
 async function patchMe(req, res, next) {
   try {
     const { username, phone, city, bio } = req.body || {};
-    const avatar = req.file?.filename;
+    const avatar = req.file?.path ?? undefined;
     const user = await userService.updateMe(req.user.id, { username, phone, city, bio, avatar });
     return res.json({ user });
   } catch (e) { if (e?.statusCode) res.status(e.statusCode); return next(e); }

@@ -1,7 +1,7 @@
 const express = require("express");
 const { requireAuth } = require("../../middlewares/auth.middleware");
 const { requireRole, protectSuperAdmin } = require("../../middlewares/role.middleware");
-const { upload } = require("../../middlewares/upload.middleware");
+const { uploadAvatar } = require("../../middlewares/upload.middleware");
 const {
   getMe, patchMe, getPublicProfile, getMyStatsByGame,
   listUsers, updateUserAdmin, deleteUser,
@@ -12,7 +12,7 @@ const router = express.Router();
 
 // Routes "me" AVANT /:id
 router.get("/me",               requireAuth, getMe);
-router.patch("/me",             requireAuth, upload.single("avatar"), patchMe);
+router.patch("/me",             requireAuth, uploadAvatar.single("avatar"), patchMe);
 router.get("/me/stats/by-game", requireAuth, getMyStatsByGame);
 
 // Admin : liste tous les users (avec filtres matchmaking)

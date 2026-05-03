@@ -8,18 +8,35 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const storage = new CloudinaryStorage({
+// Stockage pour les preuves de paiement
+const paymentStorage = new CloudinaryStorage({
   cloudinary,
   params: {
-    folder:         "jgame/payments",
+    folder:          "jgame/payments",
     allowed_formats: ["jpg", "jpeg", "png", "webp"],
-    transformation: [{ width: 1200, quality: "auto" }],
+    transformation:  [{ width: 1200, quality: "auto" }],
   },
 });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+// Stockage pour les avatars
+const avatarStorage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder:          "jgame/avatars",
+    allowed_formats: ["jpg", "jpeg", "png", "webp"],
+    transformation:  [{ width: 400, height: 400, crop: "fill", quality: "auto" }],
+  },
 });
 
-module.exports = { upload, cloudinary };
+const fileFilter = (req, file, cb) => {
+  const allowed = ["image/jpeg", "image/png", "image/jpg", "image/webp"];
+  allowed.includes(file.mimetype)
+    ? cb(null, true)
+    : cb(new Error("Format non supporté. Utilise JPG, PNG ou WEBP"), false);
+};
+
+const uploadPayment = multer({ storage: paymentStorage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+const uploadAvatar  = multer({ storage: avatarStorage,  fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+
+// Export rétrocompatible : `upload` = payment (comme avant)
+module.exports = { upload: uploadPayment, uploadAvatar, cloudinary };

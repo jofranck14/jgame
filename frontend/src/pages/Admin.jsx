@@ -131,11 +131,10 @@ export default function Admin() {
     catch (e) { toast.error(e.response?.data?.message || "Erreur"); }
   };
 
-  const viewProof = (path) => {
-    setProofImage("http://localhost:5000" + path);
-    setProofModal(true);
-  };
-
+ const viewProof = (path) => {
+  setProofImage(path);   // path EST déjà l'URL Cloudinary complète
+  setProofModal(true);
+};
   // ─── Résultats ───
   const openResultModal = async (t) => {
     setSelectedT(t);
