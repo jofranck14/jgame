@@ -20,38 +20,54 @@ export default function Chat() {
   const bottomRef                   = useRef(null);
   const socketRef                   = useRef(null);
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        // Charger infos de l'autre utilisateur
-        const uRes = await api.get(`/users/${userId}`);
-        setOtherUser(uRes.data?.user || uRes.data);
+ useEffect(() => {
+  let mounted = true;
 
-        // Charger historique
-        const mRes = await api.get(`/chat/${userId}`);
-        setMessages(mRes.data?.messages || []);
-      } catch {
-        toast.error("Erreur de chargement");
-      } finally {
-        setLoading(false);
-      }
-    };
-    init();
+  const init = async () => {
+    try {
+      const [uRes, mRes] = await Promise.all([
+        api.get(`/users/${userId}`),
+        api.get(`/chat/${userId}`),
+      ]);
+      if (!mounted) return;
+      setOtherUser(uRes.data?.user || uRes.data);
+      setMessages(mRes.data?.messages || []);
+    } catch {
+      toast.error("Erreur de chargement");
+    } finally {
+      if (mounted) setLoading(false);
+    }
+  };
 
-    // Socket
-    const socket = connectSocket();
-    socketRef.current = socket;
+  init();
 
-    socket.emit("joinConversation", { other_user_id: Number(userId) });
+  // Socket
+  const socket = connectSocket();
+  socketRef.current = socket;
 
-    socket.on("receiveMessage", (msg) => {
-      setMessages((prev) => [...prev, msg]);
-    });
+  socket.emit("joinConversation", { other_user_id: Number(userId) });
 
-    return () => {
-      socket.off("receiveMessage");
-    };
-  }, [userId]);
+  const onMessage = (msg) => {
+    if (!mounted) return;
+    const isRelevant =
+      (String(msg.sender_id) === String(me?.id) && String(msg.receiver_id) === String(userId)) ||
+      (String(msg.sender_id) === String(userId) && String(msg.receiver_id) === String(me?.id));
+    if (isRelevant) {
+      setMessages((prev) => {
+        // Évite les doublons
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+    }
+  };
+
+  socket.on("receiveMessage", onMessage);
+
+  return () => {
+    mounted = false;
+    socket.off("receiveMessage", onMessage);
+  };
+}, [userId, me?.id]);
 
   // Scroll automatique vers le bas
   useEffect(() => {
