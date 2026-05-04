@@ -48,19 +48,24 @@ export default function Chat() {
 
   socket.emit("joinConversation", { other_user_id: Number(userId) });
 
-  const onMessage = (msg) => {
-    if (!mounted) return;
-    const isRelevant =
-      (String(msg.sender_id) === String(me?.id) && String(msg.receiver_id) === String(userId)) ||
-      (String(msg.sender_id) === String(userId) && String(msg.receiver_id) === String(me?.id));
-    if (isRelevant) {
-      setMessages((prev) => {
-        // Évite les doublons
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
-    }
-  };
+const onMessage = (msg) => {
+  if (!mounted) return;
+  const myId = String(me?.id);
+  const othId = String(userId);
+  const senderId = String(msg.sender_id);
+  const receiverId = String(msg.receiver_id);
+
+  const isRelevant =
+    (senderId === myId && receiverId === othId) ||
+    (senderId === othId && receiverId === myId);
+
+  if (isRelevant) {
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      return [...prev, msg];
+    });
+  }
+};
 
   socket.on("receiveMessage", onMessage);
 
