@@ -28,7 +28,7 @@ export default function AppRoutes() {
       <Route path="/games"              element={<PrivateRoute><GamesPage /></PrivateRoute>} />
       <Route path="/games/:id"          element={<PrivateRoute><Game /></PrivateRoute>} />
       <Route path="/profile/:id"        element={<PrivateRoute><Profile /></PrivateRoute>} />
-      <Route path="/chat/:userId"       element={<PrivateRoute><Chat /></PrivateRoute>} />
+<     Route path="/chat/:userId" element={<PrivateRoute><Chat /></PrivateRoute>} />
       <Route path="/leaderboard"        element={<PrivateRoute><Leaderboard /></PrivateRoute>} />
       <Route path="/matchmaking"        element={<PrivateRoute><Matchmaking /></PrivateRoute>} />
       <Route path="/notifications"      element={<PrivateRoute><Notifications /></PrivateRoute>} />
