@@ -12,12 +12,21 @@
       "resizeMode": "contain",
       "backgroundColor": "#0F172A"
     },
+    "androidStatusBar": {
+      "backgroundColor": "#0F172A",
+      "barStyle": "light-content",
+      "translucent": true
+    },
     "android": {
-  "adaptiveIcon": {
-    "foregroundImage": "./assets/images/logo.png",
-    "backgroundColor": "#0F172A"
-  },
-      "package": "cm.jgame.app"
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/logo.png",
+        "backgroundColor": "#0F172A"
+      },
+      "package": "com.jgame.app",
+      "navigationBar": {
+        "backgroundColor": "#0F172A",
+        "barStyle": "light-content"
+      }
     },
     "ios": {
       "supportsTablet": false,

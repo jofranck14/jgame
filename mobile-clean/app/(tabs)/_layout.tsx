@@ -22,17 +22,13 @@ export default function TabsLayout() {
           headerShown: false,
           tabBarStyle: {
             backgroundColor: C.bg,
-            borderTopWidth: 0,        // ← supprime la ligne blanche
-            elevation: 0,             // ← supprime l'ombre Android
-            shadowOpacity: 0,         // ← supprime l'ombre iOS
+            borderTopWidth: 0,
+            elevation: 0,
+            shadowOpacity: 0,
             shadowColor: "transparent",
             height: 58 + insets.bottom,
-            paddingBottom: insets.bottom + 4,  // ← décale vers le haut
-            paddingTop: 10,           // ← plus d'espace en haut des icônes
-            position: "absolute",     // ← tab bar flottante sur le contenu
-            bottom: 0,
-            left: 0,
-            right: 0,
+            paddingBottom: insets.bottom + 4,
+            paddingTop: 10,
           },
           tabBarBackground: () => null,
           tabBarActiveTintColor:   C.purple,

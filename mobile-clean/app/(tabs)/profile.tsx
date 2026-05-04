@@ -79,7 +79,7 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={s.root}>
       <ScrollView
-        contentContainerStyle={s.content}
+        contentContainerStyle={[s.content, { paddingBottom: 32 }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
