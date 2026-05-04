@@ -20,10 +20,11 @@ export default function TabsLayout() {
         const tab = TABS.find((t) => t.name === route.name);
         return {
           headerShown: false,
-          tabBarStyle: {
+         tabBarStyle: {
             backgroundColor: C.bg,
-            borderTopColor: C.border,
-            borderTopWidth: 0.5,
+            borderTopWidth: 0,
+            elevation: 0,
+            shadowOpacity: 0,
             height: 52 + insets.bottom,
             paddingBottom: insets.bottom,
             paddingTop: 8,

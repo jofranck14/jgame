@@ -13,10 +13,10 @@
       "backgroundColor": "#0F172A"
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/logo.png",
-        "backgroundColor": "#0F172A"
-      },
+  "adaptiveIcon": {
+    "foregroundImage": "./assets/images/logo.png",
+    "backgroundColor": "#0F172A"
+  },
       "package": "cm.jgame.app"
     },
     "ios": {
@@ -27,6 +27,12 @@
       "expo-router",
       "expo-font",
       "@react-native-community/datetimepicker"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "341ec54c-fad6-4234-becd-26c2348f116b"
+      }
+    }
   }
 }

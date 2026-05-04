@@ -6,6 +6,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { C } from "../../src/theme/colors";
 import { useAuthStore } from "../../src/store/authStore";
 import api, { BASE_URL } from "../../src/api/api";
@@ -49,9 +50,13 @@ export default function ChatScreen() {
   }, [scrollToBottom]);
 
   // ── Charger historique + infos user ──────────────────
-  useEffect(() => {
+ useFocusEffect(
+  useCallback(() => {
     let mounted = true;
+    seenIds.current.clear(); // ← Vide les IDs vus pour éviter les doublons
+
     const load = async () => {
+      setLoading(true);
       try {
         const [histRes, userRes] = await Promise.all([
           api.get(`/chat/${otherId}`),
@@ -69,9 +74,11 @@ export default function ChatScreen() {
         if (mounted) setLoading(false);
       }
     };
+
     load();
     return () => { mounted = false; };
-  }, [otherId]);
+  }, [otherId])
+);
 
   // ── Socket.io ─────────────────────────────────────────
   useEffect(() => {
