@@ -27,24 +27,21 @@ async function saveMessage({ sender_id, receiver_id, message }) {
 }
 
 async function getConversation(user1_id, user2_id, limit = 50) {
-  const [rows] = await pool.execute(
-    `SELECT
-        m.id,
-        m.message,
-        m.created_at,
-        m.sender_id,
-        m.receiver_id
-      FROM messages m
-      WHERE
-        (m.sender_id = ? AND m.receiver_id = ?)
-        OR
-        (m.sender_id = ? AND m.receiver_id = ?)
-      ORDER BY m.created_at DESC
-      LIMIT ?`,
-    [user1_id, user2_id, user2_id, user1_id, limit],
-  );
-
-  return rows.reverse();
+  try {
+    const [rows] = await pool.execute(
+      `SELECT m.id, m.message, m.created_at, m.sender_id, m.receiver_id
+       FROM messages m
+       WHERE (m.sender_id = ? AND m.receiver_id = ?)
+          OR (m.sender_id = ? AND m.receiver_id = ?)
+       ORDER BY m.created_at DESC
+       LIMIT 50`,
+      [user1_id, user2_id, user2_id, user1_id],
+    );
+    return rows.reverse();
+  } catch (err) {
+    console.error("getConversation error:", err.message);
+    throw err;
+  }
 }
 
 /**
