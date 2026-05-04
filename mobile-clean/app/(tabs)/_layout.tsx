@@ -20,22 +20,28 @@ export default function TabsLayout() {
         const tab = TABS.find((t) => t.name === route.name);
         return {
           headerShown: false,
-         tabBarStyle: {
+          tabBarStyle: {
             backgroundColor: C.bg,
-            borderTopWidth: 0,
-            elevation: 0,
-            shadowOpacity: 0,
-            height: 52 + insets.bottom,
-            paddingBottom: insets.bottom,
-            paddingTop: 8,
+            borderTopWidth: 0,        // ← supprime la ligne blanche
+            elevation: 0,             // ← supprime l'ombre Android
+            shadowOpacity: 0,         // ← supprime l'ombre iOS
+            shadowColor: "transparent",
+            height: 58 + insets.bottom,
+            paddingBottom: insets.bottom + 4,  // ← décale vers le haut
+            paddingTop: 10,           // ← plus d'espace en haut des icônes
+            position: "absolute",     // ← tab bar flottante sur le contenu
+            bottom: 0,
+            left: 0,
+            right: 0,
           },
+          tabBarBackground: () => null,
           tabBarActiveTintColor:   C.purple,
           tabBarInactiveTintColor: C.gray,
           tabBarIcon: ({ color }) => (
             <Text style={{ fontSize: 22, color }}>{tab?.icon ?? "•"}</Text>
           ),
           tabBarLabel: ({ color }) => (
-            <Text style={{ color, fontSize: 10, marginTop: 1, marginBottom: 2 }}>
+            <Text style={{ color, fontSize: 10, marginTop: 2, marginBottom: 0 }}>
               {tab?.label}
             </Text>
           ),
