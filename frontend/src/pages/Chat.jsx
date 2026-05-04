@@ -33,9 +33,10 @@ export default function Chat() {
       setOtherUser(uRes.data?.user || uRes.data);
       setMessages(mRes.data?.messages || []);
         } catch (err) {
-        console.error("Chat init error:", err?.response?.data || err?.message || err);
-        toast.error("Erreur de chargement");
-      }finally {
+  console.error("Chat init error:", err?.response?.data || err?.message || err);
+  console.log("ERREUR COMPLETE:", JSON.stringify(err?.response || err));
+  toast.error("Erreur de chargement");
+}finally {
       if (mounted) setLoading(false);
     }
   };
