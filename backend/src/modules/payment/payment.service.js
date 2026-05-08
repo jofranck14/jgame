@@ -1,235 +1,153 @@
 const { pool } = require("../../config/db");
 
 async function createPayment(userId, { tournament_id, method, transaction_ref, proof_image }) {
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    await conn.beginTransaction();
-
-    const [tRows] = await conn.execute(
-      "SELECT id, price FROM tournaments WHERE id = ? LIMIT 1 FOR UPDATE",
+    await client.query("BEGIN");
+    const tRes = await client.query(
+      "SELECT id, price FROM tournaments WHERE id = $1 LIMIT 1 FOR UPDATE",
       [tournament_id],
     );
-
-    const t = tRows[0];
-    if (!t) {
-      const err = new Error("Tournament not found");
-      err.statusCode = 404;
-      throw err;
-    }
-
+    const t = tRes.rows[0];
+    if (!t) { const err = new Error("Tournament not found"); err.statusCode = 404; throw err; }
     const amount = Number(t.price) || 0;
-    if (amount <= 0) {
-      const err = new Error("This tournament does not require payment");
-      err.statusCode = 400;
-      throw err;
-    }
+    if (amount <= 0) { const err = new Error("This tournament does not require payment"); err.statusCode = 400; throw err; }
 
-    const [existing] = await conn.execute(
-      "SELECT id, status FROM payments WHERE tournament_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1",
+    const existing = await client.query(
+      "SELECT id, status FROM payments WHERE tournament_id = $1 AND user_id = $2 ORDER BY id DESC LIMIT 1",
       [tournament_id, userId],
     );
-
-    if (existing[0] && (existing[0].status === "pending" || existing[0].status === "success")) {
-      const err = new Error("Payment already exists for this tournament");
-      err.statusCode = 409;
-      throw err;
+    if (existing.rows[0] && ["pending","success"].includes(existing.rows[0].status)) {
+      const err = new Error("Payment already exists for this tournament"); err.statusCode = 409; throw err;
     }
 
-    const [res] = await conn.execute(
+    const res = await client.query(
       `INSERT INTO payments (user_id, tournament_id, amount, status, method, transaction_ref, proof_image, verified_by_admin)
-       VALUES (?, ?, ?, 'pending', ?, ?, ?, 0)`,
+       VALUES ($1, $2, $3, 'pending', $4, $5, $6, 0) RETURNING id`,
       [userId, tournament_id, amount, method || null, transaction_ref || null, proof_image || null],
     );
-
-    const payment = await getPaymentById(res.insertId, userId, conn);
-    await conn.commit();
+    const payment = await getPaymentById(res.rows[0].id, userId, client);
+    await client.query("COMMIT");
     return payment;
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  } catch (err) { await client.query("ROLLBACK"); throw err; }
+  finally { client.release(); }
 }
 
 async function getPaymentById(id, userId, conn = pool) {
-  const [rows] = await conn.execute(
-    `SELECT
-        id, user_id, tournament_id, amount, status, method, transaction_ref, proof_image, verified_by_admin, created_at
-      FROM payments
-      WHERE id = ? AND user_id = ?
-      LIMIT 1`,
+  const { rows } = await conn.query(
+    `SELECT id, user_id, tournament_id, amount, status, method, transaction_ref, proof_image, verified_by_admin, created_at
+     FROM payments WHERE id = $1 AND user_id = $2 LIMIT 1`,
     [id, userId],
   );
   return rows[0] || null;
 }
 
 async function confirmPayment(userId, { payment_id }) {
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    await conn.beginTransaction();
-
-    const [pRows] = await conn.execute(
-      "SELECT id, user_id, tournament_id, amount, status, verified_by_admin FROM payments WHERE id = ? FOR UPDATE",
+    await client.query("BEGIN");
+    const pRes = await client.query(
+      "SELECT id, user_id, tournament_id, amount, status, verified_by_admin FROM payments WHERE id = $1 FOR UPDATE",
       [payment_id],
     );
-
-    const payment = pRows[0];
-    if (!payment) {
-      const err = new Error("Payment not found");
-      err.statusCode = 404;
-      throw err;
-    }
-    if (Number(payment.user_id) !== Number(userId)) {
-      const err = new Error("Forbidden");
-      err.statusCode = 403;
-      throw err;
-    }
+    const payment = pRes.rows[0];
+    if (!payment) { const err = new Error("Payment not found"); err.statusCode = 404; throw err; }
+    if (Number(payment.user_id) !== Number(userId)) { const err = new Error("Forbidden"); err.statusCode = 403; throw err; }
 
     if (payment.status === "success") {
-      const updated = await getPaymentById(payment.id, userId, conn);
-      await conn.commit();
-      return {
-        payment: updated,
-        alreadyConfirmed: true,
-        participationGranted: Boolean(updated?.verified_by_admin),
-      };
+      const updated = await getPaymentById(payment.id, userId, client);
+      await client.query("COMMIT");
+      return { payment: updated, alreadyConfirmed: true, participationGranted: Boolean(updated?.verified_by_admin) };
     }
-
     if (payment.status !== "pending") {
-      const err = new Error("Payment cannot be confirmed");
-      err.statusCode = 409;
-      throw err;
+      const err = new Error("Payment cannot be confirmed"); err.statusCode = 409; throw err;
     }
 
-    // Mark as success (table enum: pending/success/failed)
-    await conn.execute(
-      "UPDATE payments SET status = 'success' WHERE id = ?",
-      [payment.id],
-    );
+    await client.query("UPDATE payments SET status = 'success' WHERE id = $1", [payment.id]);
 
-    // Only admin-verified payments grant participation.
     if (!payment.verified_by_admin) {
-      const updated = await getPaymentById(payment.id, userId, conn);
-      await conn.commit();
-      return {
-        payment: updated,
-        alreadyConfirmed: false,
-        participationGranted: false,
-        message: "Payment marked as success, pending admin verification",
-      };
+      const updated = await getPaymentById(payment.id, userId, client);
+      await client.query("COMMIT");
+      return { payment: updated, alreadyConfirmed: false, participationGranted: false, message: "Payment marked as success, pending admin verification" };
     }
 
-    // Add participant only after confirmed + verified payment
-    const tournamentId = payment.tournament_id;
-
-    const [tRows] = await conn.execute(
-      `SELECT
-          t.id,
-          t.max_players,
-          COUNT(p.id) AS current_players
-        FROM tournaments t
-        LEFT JOIN participants p ON p.tournament_id = t.id
-        WHERE t.id = ?
-        GROUP BY t.id, t.max_players
-        FOR UPDATE`,
-      [tournamentId],
+    const tRes = await client.query(
+      `SELECT t.id, t.max_players, COUNT(p.id) AS current_players
+       FROM tournaments t LEFT JOIN participants p ON p.tournament_id = t.id
+       WHERE t.id = $1 GROUP BY t.id, t.max_players FOR UPDATE`,
+      [payment.tournament_id],
     );
-
-    const t = tRows[0];
-    if (!t) {
-      const err = new Error("Tournament not found");
-      err.statusCode = 404;
-      throw err;
-    }
-
-    const currentPlayers = Number(t.current_players) || 0;
-    const maxPlayers = Number(t.max_players);
-    if (currentPlayers >= maxPlayers) {
-      const err = new Error("Tournament is full");
-      err.statusCode = 409;
-      throw err;
+    const t = tRes.rows[0];
+    if (!t) { const err = new Error("Tournament not found"); err.statusCode = 404; throw err; }
+    if (Number(t.current_players) >= Number(t.max_players)) {
+      const err = new Error("Tournament is full"); err.statusCode = 409; throw err;
     }
 
     try {
-      await conn.execute(
-        "INSERT INTO participants (tournament_id, user_id, payment_status) VALUES (?, ?, 'paid')",
-        [tournamentId, userId],
+      await client.query(
+        "INSERT INTO participants (tournament_id, user_id, payment_status) VALUES ($1, $2, 'paid')",
+        [payment.tournament_id, userId],
       );
     } catch (e) {
-      if (e && e.code === "ER_DUP_ENTRY") {
-        // already a participant: ensure payment_status is up-to-date
-        await conn.execute(
-          "UPDATE participants SET payment_status = 'paid' WHERE tournament_id = ? AND user_id = ?",
-          [tournamentId, userId],
+      if (e?.code === "23505") {
+        await client.query(
+          "UPDATE participants SET payment_status = 'paid' WHERE tournament_id = $1 AND user_id = $2",
+          [payment.tournament_id, userId],
         );
-      } else {
-        throw e;
-      }
+      } else throw e;
     }
 
-    const updated = await getPaymentById(payment.id, userId, conn);
-    await conn.commit();
+    const updated = await getPaymentById(payment.id, userId, client);
+    await client.query("COMMIT");
     return { payment: updated, alreadyConfirmed: false, participationGranted: true };
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
+  } catch (err) { await client.query("ROLLBACK"); throw err; }
+  finally { client.release(); }
 }
 
-// Dans payment.service.js — remplacer verifyPaymentByAdmin
 async function verifyPaymentByAdmin({ payment_id }) {
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    await conn.beginTransaction();
-    const [pRows] = await conn.execute(
-      "SELECT id, user_id, tournament_id, status, amount, verified_by_admin FROM payments WHERE id = ? FOR UPDATE",
+    await client.query("BEGIN");
+    const pRes = await client.query(
+      "SELECT id, user_id, tournament_id, status, amount, verified_by_admin FROM payments WHERE id = $1 FOR UPDATE",
       [payment_id],
     );
-    const payment = pRows[0];
+    const payment = pRes.rows[0];
     if (!payment) { const e = new Error("Payment not found"); e.statusCode = 404; throw e; }
-    if (payment.verified_by_admin) { await conn.commit(); return { alreadyVerified: true }; }
+    if (payment.verified_by_admin) { await client.query("COMMIT"); return { alreadyVerified: true }; }
 
-    await conn.execute("UPDATE payments SET verified_by_admin = 1 WHERE id = ?", [payment.id]);
+    await client.query("UPDATE payments SET verified_by_admin = 1 WHERE id = $1", [payment.id]);
 
-    if (payment.status === "success" || true) {
-      // Ajouter le joueur aux participants si pas encore dedans
-      const [existing] = await conn.execute(
-        "SELECT id FROM participants WHERE tournament_id = ? AND user_id = ? LIMIT 1",
+    const existing = await client.query(
+      "SELECT id FROM participants WHERE tournament_id = $1 AND user_id = $2 LIMIT 1",
+      [payment.tournament_id, payment.user_id],
+    );
+    if (!existing.rows.length) {
+      await client.query(
+        "INSERT INTO participants (tournament_id, user_id, payment_status) VALUES ($1, $2, 'paid')",
         [payment.tournament_id, payment.user_id],
-      );
-      if (!existing.length) {
-        await conn.execute(
-          "INSERT INTO participants (tournament_id, user_id, payment_status) VALUES (?, ?, 'paid')",
-          [payment.tournament_id, payment.user_id],
-        );
-      }
-
-      // Récupérer infos tournoi pour la notif
-      const [tRows] = await conn.execute(
-        "SELECT title FROM tournaments WHERE id = ? LIMIT 1", [payment.tournament_id],
-      );
-      const tournamentTitle = tRows[0]?.title || `Tournoi #${payment.tournament_id}`;
-
-      // Notifier le joueur que sa participation est confirmée
-      await conn.execute(
-        "INSERT INTO notifications (user_id, type, title, message, link, is_read) VALUES (?, 'payment', ?, ?, ?, 0)",
-        [
-          payment.user_id,
-          "✅ Participation confirmée !",
-          `Ton paiement de ${Number(payment.amount).toLocaleString()} FCFA pour "${tournamentTitle}" a été validé. Tu es officiellement inscrit !`,
-          `/tournaments/${payment.tournament_id}`,
-        ],
       );
     }
 
-    await conn.commit();
+    const tRes = await client.query(
+      "SELECT title FROM tournaments WHERE id = $1 LIMIT 1", [payment.tournament_id],
+    );
+    const tournamentTitle = tRes.rows[0]?.title || `Tournoi #${payment.tournament_id}`;
+
+    await client.query(
+      "INSERT INTO notifications (user_id, type, title, message, link, is_read) VALUES ($1, 'payment', $2, $3, $4, 0)",
+      [
+        payment.user_id,
+        "✅ Participation confirmée !",
+        `Ton paiement de ${Number(payment.amount).toLocaleString()} FCFA pour "${tournamentTitle}" a été validé. Tu es officiellement inscrit !`,
+        `/tournaments/${payment.tournament_id}`,
+      ],
+    );
+
+    await client.query("COMMIT");
     return { verified: true, payment };
-  } catch (err) { await conn.rollback(); throw err; }
-  finally { conn.release(); }
+  } catch (err) { await client.query("ROLLBACK"); throw err; }
+  finally { client.release(); }
 }
 
 module.exports = { createPayment, confirmPayment, getPaymentById, verifyPaymentByAdmin };
-

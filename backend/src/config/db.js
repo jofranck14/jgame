@@ -9,9 +9,14 @@ const pool = new Pool({
   database: env.DB_NAME,
   max:      env.DB_CONNECTION_LIMIT,
   ssl:      { rejectUnauthorized: false },
-  family:   4, // ← Force IPv4
+  family:   4,
 });
 
-pool.execute = (sql, params) => pool.query(sql, params);
+// Convertit les ? MySQL en $1 $2 ... PostgreSQL
+pool.execute = (sql, params) => {
+  let i = 0;
+  const pgSql = sql.replace(/\?/g, () => `$${++i}`);
+  return pool.query(pgSql, params).then((r) => [r.rows, r]);
+};
 
 module.exports = { pool };
