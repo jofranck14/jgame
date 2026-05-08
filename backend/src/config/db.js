@@ -12,18 +12,7 @@ const pool = new Pool({
   family:   4,
 });
 
-// Log erreurs de connexion
-pool.on("error", (err) => {
-  console.error("PostgreSQL pool error:", err.message);
-});
-
-// Test de connexion au démarrage
-pool.query("SELECT 1").then(() => {
-  console.log("[DB] Supabase PostgreSQL connecté ✅");
-}).catch((err) => {
-  console.error("[DB] Erreur connexion Supabase:", err.message);
-});
-
+// Convertit les ? MySQL en $1 $2 ... PostgreSQL
 pool.execute = (sql, params) => {
   let i = 0;
   const pgSql = sql.replace(/\?/g, () => `$${++i}`);
