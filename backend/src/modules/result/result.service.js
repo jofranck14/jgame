@@ -82,8 +82,8 @@ async function getGlobalLeaderboard(limit = 100) {
   return rows;
 }
 
-async function getGameLeaderboard(game_id, limit = 100) {
-  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+async function getGameLeaderboard(game_id, limit = 20) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
   const { rows } = await pool.query(
     `SELECT u.id AS user_id, u.username, u.avatar, ugs.points, ugs.wins, ugs.losses,
         CASE WHEN ugs.points >= 200 THEN 'goat' WHEN ugs.points >= 100 THEN 'legendary' ELSE 'beginner' END AS level
