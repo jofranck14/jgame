@@ -50,7 +50,7 @@ async function getTournamentResults(req, res, next) {
 
 async function getLeaderboard(req, res, next) {
   try {
-    const limit = Math.min(Number.parseInt(req.query.limit) || 20, 100);
+    const limit = Math.min(Number.parseInt(req.query.limit) || 1000, 10000);
     const leaderboard = await resultService.getGlobalLeaderboard(limit);
     return res.status(200).json({ leaderboard });
   } catch (err) {
@@ -61,7 +61,7 @@ async function getLeaderboard(req, res, next) {
 async function getGameLeaderboard(req, res, next) {
   try {
     const game_id = toInt(req.params.game_id, "game_id");
-    const limit = Math.min(Number.parseInt(req.query.limit) || 20, 100);
+    const limit = Math.min(Number.parseInt(req.query.limit) || 1000, 10000);
     const leaderboard = await resultService.getGameLeaderboard(game_id, limit);
     return res.status(200).json({ leaderboard });
   } catch (err) {
