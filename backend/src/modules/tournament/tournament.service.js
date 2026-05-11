@@ -119,14 +119,22 @@ async function joinTournament(tournamentId, userId) {
   try {
     await client.query("BEGIN");
 
+    // 1. Verrouiller la ligne du tournoi SANS GROUP BY
     const tRes = await client.query(
-      `SELECT t.id, t.title, t.price, t.max_players, COUNT(p.id) AS current_players
-       FROM tournaments t LEFT JOIN participants p ON p.tournament_id = t.id
-       WHERE t.id = $1 GROUP BY t.id, t.title, t.price, t.max_players FOR UPDATE`, [tournamentId],
+      "SELECT id, title, price, max_players FROM tournaments WHERE id = $1 FOR UPDATE",
+      [tournamentId],
     );
     const t = tRes.rows[0];
     if (!t) { const e = new Error("Tournament not found"); e.statusCode = 404; throw e; }
-    if (Number(t.current_players) >= Number(t.max_players)) {
+
+    // 2. Compter les participants séparément
+    const countRes = await client.query(
+      "SELECT COUNT(*) AS current_players FROM participants WHERE tournament_id = $1",
+      [tournamentId],
+    );
+    const currentPlayers = Number(countRes.rows[0]?.current_players) || 0;
+
+    if (currentPlayers >= Number(t.max_players)) {
       const e = new Error("Tournament is full"); e.statusCode = 409; throw e;
     }
 
