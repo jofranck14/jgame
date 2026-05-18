@@ -68,6 +68,9 @@ export default function Tournament() {
   const [paymentInfo, setPaymentInfo] = useState(null);
   const [proofFile, setProofFile]     = useState(null);
   const [submitting, setSubmitting]   = useState(false);
+  const [msgModal, setMsgModal]       = useState(false);
+  const [msgText, setMsgText]         = useState("");
+  const [sending, setSending]         = useState(false);
 
   const loadTournament = async () => {
     try {
@@ -118,6 +121,21 @@ export default function Tournament() {
     }
   };
 
+  const sendMessageToAll = async () => {
+    if (!msgText.trim()) { toast.error("Écris un message"); return; }
+    setSending(true);
+    try {
+      const res = await api.post(`/tournaments/${id}/message`, { message: msgText });
+      toast.success(`✅ Message envoyé à ${res.data.sent} participant(s) !`);
+      setMsgModal(false);
+      setMsgText("");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Erreur");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const submitPayment = async () => {
     if (!proofFile) { toast.error("Ajoute la capture d'écran de ton paiement"); return; }
     setSubmitting(true);
@@ -159,6 +177,7 @@ export default function Tournament() {
   const isCancelled = tournament.status === "cancelled";
   const isOngoing   = tournament.status === "ongoing";
   const canJoin     = !isFull && !isCompleted && !isCancelled && !isOngoing;
+  const isOrganizerOrAdmin = user?.id === tournament.organizer_id || user?.role === "admin";
 
   const prizePool = tournament.price > 0
     ? `${Math.round(Number(tournament.price) * max * 0.7).toLocaleString()} FCFA`
@@ -172,7 +191,7 @@ export default function Tournament() {
       <Navbar />
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
 
-        {/* ── Hero ── */}
+        {/* Hero */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
           className="relative rounded-3xl overflow-hidden p-8"
           style={{ background: "linear-gradient(135deg,#1e1040 0%,#0F172A 60%,#0c1a2e 100%)" }}>
@@ -204,21 +223,19 @@ export default function Tournament() {
           </div>
         </motion.div>
 
-        {/* ── Corps ── */}
+        {/* Corps */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
           {/* Colonne principale */}
           <div className="md:col-span-2 space-y-4">
-
-            {/* Infos */}
             <Card>
               <h2 className="text-white font-semibold mb-4">Informations</h2>
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { label: "Date de début", value: formatDateTime(tournament.date), emoji: "📅" },
-                  { label: "Type",          value: tournament.type === "physical" ? "📍 Présentiel" : "🌐 En ligne", emoji: "" },
-                  { label: "1er place",     value: "+20 pts 🥇", emoji: "" },
-                  { label: "2e place",      value: "+10 pts 🥈", emoji: "" },
+                  { label: "Date de début", value: formatDateTime(tournament.date) },
+                  { label: "Type",          value: tournament.type === "physical" ? "📍 Présentiel" : "🌐 En ligne" },
+                  { label: "1er place",     value: "+20 pts 🥇" },
+                  { label: "2e place",      value: "+10 pts 🥈" },
                 ].map((info) => (
                   <div key={info.label} className="rounded-xl p-3"
                     style={{ background: "rgba(15,23,42,0.8)", border: "1px solid rgba(51,65,85,0.5)" }}>
@@ -229,7 +246,6 @@ export default function Tournament() {
               </div>
             </Card>
 
-            {/* ── Description / Lieu ── */}
             {(tournament.location_details || tournament.city) && (
               <Card>
                 <h2 className="text-white font-semibold mb-3">
@@ -244,9 +260,7 @@ export default function Tournament() {
                 {tournament.location_details && (
                   <div className="rounded-xl p-3"
                     style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.2)" }}>
-                    <p className="text-slate-300 text-sm leading-relaxed">
-                      {tournament.location_details}
-                    </p>
+                    <p className="text-slate-300 text-sm leading-relaxed">{tournament.location_details}</p>
                   </div>
                 )}
                 {tournament.type === "physical" && (
@@ -257,12 +271,8 @@ export default function Tournament() {
               </Card>
             )}
 
-            {/* ── Barre de places ── */}
-            <Card>
-              <PlacesBar current={current} max={max} />
-            </Card>
+            <Card><PlacesBar current={current} max={max} /></Card>
 
-            {/* ── Participants ── */}
             {tournament.participants && tournament.participants.length > 0 && (
               <Card>
                 <h2 className="text-white font-semibold mb-3">
@@ -292,7 +302,7 @@ export default function Tournament() {
             )}
           </div>
 
-          {/* ── Colonne action ── */}
+          {/* Colonne action */}
           <div className="space-y-4">
             <Card className="text-center">
               <div className="text-5xl mb-3">🏆</div>
@@ -300,7 +310,6 @@ export default function Tournament() {
               <p className="text-white font-bold text-lg mb-1">{prizePool}</p>
               <p className="text-slate-500 text-xs mb-5">70% du pool · 10% JGAME</p>
 
-              {/* Bouton rejoindre */}
               {isFull ? (
                 <div className="w-full py-3 px-4 rounded-xl text-center text-sm font-semibold"
                   style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", color: "#F87171" }}>
@@ -327,7 +336,6 @@ export default function Tournament() {
                 </Button>
               )}
 
-              {/* Message urgence places */}
               {canJoin && pct >= 90 && (
                 <p className="text-red-400 text-xs mt-2 font-medium">
                   🔥 Dépêche-toi ! Plus que {remaining} place{remaining > 1 ? "s" : ""} !
@@ -340,6 +348,19 @@ export default function Tournament() {
               )}
             </Card>
 
+            {/* Bouton message participants — organisateur/admin uniquement */}
+            {isOrganizerOrAdmin && (
+              <Card>
+                <p className="text-white font-semibold text-sm mb-2">📢 Contacter les participants</p>
+                <p className="text-slate-400 text-xs mb-3">
+                  Envoie un message à tous les joueurs inscrits.
+                </p>
+                <Button className="w-full" onClick={() => setMsgModal(true)}>
+                  ✉️ Envoyer un message
+                </Button>
+              </Card>
+            )}
+
             <Card>
               <p className="text-slate-400 text-xs text-center">
                 📅 Créé le {formatDateTime(tournament.created_at)}
@@ -349,11 +370,9 @@ export default function Tournament() {
         </div>
       </div>
 
-      {/* ══════ MODAL Paiement ══════ */}
+      {/* MODAL Paiement */}
       <Modal isOpen={payModal} onClose={() => { setPayModal(false); setProofFile(null); }} title="💳 Paiement requis">
         <div className="space-y-4">
-
-          {/* Montant */}
           <div className="rounded-xl p-4 text-center"
             style={{ background: "rgba(15,23,42,0.8)", border: "1px solid rgba(51,65,85,0.5)" }}>
             <p className="text-slate-400 text-sm mb-1">Montant à payer</p>
@@ -362,17 +381,13 @@ export default function Tournament() {
             </p>
           </div>
 
-          {/* Instructions avec 2 numéros */}
           <div className="rounded-xl p-4 space-y-3"
             style={{ background: "rgba(15,23,42,0.8)", border: "1px solid rgba(51,65,85,0.5)" }}>
             <p className="text-white font-semibold text-sm mb-1">📋 Instructions de paiement</p>
-
             <div className="flex items-start gap-2">
               <span className="text-purple-400 font-bold text-xs flex-shrink-0 mt-0.5">1.</span>
               <p className="text-slate-400 text-sm">Envoie le montant via <span className="text-white font-medium">MTN MoMo</span> ou <span className="text-white font-medium">Orange Money</span></p>
             </div>
-
-            {/* Numéros de paiement */}
             <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(124,58,237,0.3)" }}>
               <div className="px-3 py-2" style={{ background: "rgba(124,58,237,0.1)" }}>
                 <p className="text-purple-300 text-xs font-semibold">📱 Numéros de paiement</p>
@@ -394,27 +409,20 @@ export default function Tournament() {
                 </div>
               </div>
             </div>
-
-            {/* Nom bénéficiaire */}
             <div className="flex items-start gap-2">
               <span className="text-purple-400 font-bold text-xs flex-shrink-0 mt-0.5">2.</span>
-              <p className="text-slate-400 text-sm">
-                Nom du bénéficiaire : <span className="text-white font-bold">BOPDA FEUKOUO JOFRANCK</span>
-              </p>
+              <p className="text-slate-400 text-sm">Nom du bénéficiaire : <span className="text-white font-bold">BOPDA FEUKOUO JOFRANCK</span></p>
             </div>
-
             <div className="flex items-start gap-2">
               <span className="text-purple-400 font-bold text-xs flex-shrink-0 mt-0.5">3.</span>
               <p className="text-slate-400 text-sm">Fais une capture d'écran de la confirmation de paiement</p>
             </div>
-
             <div className="flex items-start gap-2">
               <span className="text-purple-400 font-bold text-xs flex-shrink-0 mt-0.5">4.</span>
               <p className="text-slate-400 text-sm">Uploade la capture ci-dessous</p>
             </div>
           </div>
 
-          {/* Upload capture */}
           <div>
             <label className="text-sm text-slate-400 mb-2 block">
               📸 Capture d'écran <span className="text-red-400">*</span>
@@ -440,7 +448,6 @@ export default function Tournament() {
             </label>
           </div>
 
-          {/* Avertissement */}
           <div className="rounded-xl p-3"
             style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)" }}>
             <p className="text-yellow-400 text-xs">
@@ -449,7 +456,6 @@ export default function Tournament() {
             </p>
           </div>
 
-          {/* Boutons */}
           <div className="flex gap-3">
             <Button variant="outline" className="flex-1"
               onClick={() => { setPayModal(false); setProofFile(null); }}>
@@ -457,6 +463,44 @@ export default function Tournament() {
             </Button>
             <Button className="flex-1" disabled={!proofFile || submitting} onClick={submitPayment}>
               {submitting ? "Envoi..." : "Envoyer ✅"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL Message participants */}
+      <Modal isOpen={msgModal} onClose={() => { setMsgModal(false); setMsgText(""); }} title="📢 Message aux participants">
+        <div className="space-y-4">
+          <div className="rounded-xl p-3"
+            style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.3)" }}>
+            <p className="text-purple-300 text-xs">
+              Ce message sera envoyé en notification et en message privé à tous les participants confirmés du tournoi.
+            </p>
+          </div>
+
+          <div>
+            <label className="text-sm text-slate-400 mb-2 block">
+              Ton message <span className="text-red-400">*</span>
+            </label>
+            <textarea
+              value={msgText}
+              onChange={(e) => setMsgText(e.target.value)}
+              placeholder="Ex: Le tournoi commence dans 30 minutes, connectez-vous !"
+              rows={4}
+              maxLength={500}
+              className="w-full rounded-xl px-4 py-3 text-white text-sm resize-none focus:outline-none focus:border-purple-500"
+              style={{ background: "#0F172A", border: "1px solid #334155" }}
+            />
+            <p className="text-slate-500 text-xs mt-1 text-right">{msgText.length}/500</p>
+          </div>
+
+          <div className="flex gap-3">
+            <Button variant="outline" className="flex-1"
+              onClick={() => { setMsgModal(false); setMsgText(""); }}>
+              Annuler
+            </Button>
+            <Button className="flex-1" disabled={!msgText.trim() || sending} onClick={sendMessageToAll}>
+              {sending ? "Envoi..." : "Envoyer ✅"}
             </Button>
           </div>
         </div>

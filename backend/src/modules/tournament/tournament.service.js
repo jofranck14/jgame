@@ -200,4 +200,42 @@ async function joinTournament(tournamentId, userId) {
   }
 }
 
-module.exports = { createTournament, listTournaments, getTournamentById, updateTournament, deleteTournament, joinTournament };
+async function messageParticipants(tournamentId, organizerId, message) {
+  const client = await pool.connect();
+  try {
+    const tRes = await client.query(
+      "SELECT id, title, organizer_id FROM tournaments WHERE id = $1 LIMIT 1",
+      [tournamentId],
+    );
+    const tournament = tRes.rows[0];
+    if (!tournament) { const e = new Error("Tournament not found"); e.statusCode = 404; throw e; }
+
+    const parts = await client.query(
+      `SELECT p.user_id FROM participants p
+       WHERE p.tournament_id = $1 AND p.payment_status = 'paid' AND p.user_id <> $2`,
+      [tournamentId, organizerId],
+    );
+
+    if (parts.rows.length === 0) return { sent: 0 };
+
+    for (const p of parts.rows) {
+      await client.query(
+        "INSERT INTO messages (sender_id, receiver_id, message, is_read) VALUES ($1, $2, $3, 0)",
+        [organizerId, p.user_id, `[🏆 ${tournament.title}] ${message}`],
+      );
+      await client.query(
+        "INSERT INTO notifications (user_id, type, title, message, link, is_read) VALUES ($1, $2, $3, $4, $5, 0)",
+        [p.user_id, "tournament", `📢 Message de l'organisateur — ${tournament.title}`, message, `/tournaments/${tournamentId}`],
+      );
+    }
+
+    return { sent: parts.rows.length };
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = {
+  createTournament, listTournaments, getTournamentById,
+  updateTournament, deleteTournament, joinTournament, messageParticipants
+};

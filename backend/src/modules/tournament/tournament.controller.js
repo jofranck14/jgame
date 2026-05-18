@@ -72,4 +72,27 @@ async function deleteTournament(req, res, next) {
   } catch (e) { return next(e); }
 }
 
-module.exports = { createTournament, listTournaments, getTournament, joinTournament, updateTournament, deleteTournament };
+async function messageParticipants(req, res, next) {
+  try {
+    const id      = toInt(req.params.id, "id");
+    const message = String(req.body?.message || "").trim();
+    if (!message) { res.status(400); return next(new Error("message required")); }
+
+    const tournament = await tournamentService.getTournamentById(id);
+    if (!tournament) { res.status(404); return next(new Error("Not found")); }
+    if (tournament.organizer_id !== req.user.id && req.user.role !== "admin") {
+      res.status(403); return next(new Error("Forbidden"));
+    }
+
+    const result = await tournamentService.messageParticipants(id, req.user.id, message);
+    return res.json({ message: "Messages envoyés", sent: result.sent });
+  } catch (e) {
+    if (e?.statusCode) res.status(e.statusCode);
+    return next(e);
+  }
+}
+
+module.exports = {
+  createTournament, listTournaments, getTournament,
+  joinTournament, updateTournament, deleteTournament, messageParticipants
+};
