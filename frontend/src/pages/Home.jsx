@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import Navbar from "../components/layout/Navbar";
 import Card from "../components/ui/Card";
@@ -8,6 +8,7 @@ import Button from "../components/ui/Button";
 import { listTournamentsApi, listGamesApi, getLeaderboardApi } from "../features/tournaments/tournamentApi";
 import { formatDateTime } from "../utils/formatDate";
 import { useAuthStore } from "../features/auth/authStore";
+import api from "../services/api";
 
 const MAX_TOURNAMENTS = 6;
 const MAX_GAMES = 8;
@@ -33,6 +34,9 @@ export default function Home() {
   const [games, setGames]             = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading]         = useState(true);
+  const [conversations, setConversations] = useState([]);
+  const [showConvs, setShowConvs]         = useState(false);
+  const [unreadCount, setUnreadCount]     = useState(0);
   const { user } = useAuthStore();
 
   useEffect(() => {
@@ -55,7 +59,20 @@ export default function Home() {
     fetchAll();
   }, []);
 
-  // Données limitées pour la home
+  // Charger les conversations
+  useEffect(() => {
+    if (!user) return;
+    api.get("/chat/conversations")
+      .then((res) => {
+        const convs = res.data?.conversations || res.data || [];
+        setConversations(convs);
+        // Compter les messages non lus
+        const unread = convs.filter((c) => c.is_read === 0 || c.is_read === false).length;
+        setUnreadCount(unread);
+      })
+      .catch(() => {});
+  }, [user]);
+
   const visibleTournaments = tournaments.slice(0, MAX_TOURNAMENTS);
   const visibleGames = games.slice(0, MAX_GAMES);
   const hasMoreTournaments = tournaments.length > MAX_TOURNAMENTS;
@@ -165,8 +182,6 @@ export default function Home() {
                   </motion.div>
                 ))}
               </div>
-
-              {/* Bouton "Voir plus" si > 6 tournois */}
               {hasMoreTournaments && (
                 <div className="text-center mt-6">
                   <button
@@ -189,7 +204,6 @@ export default function Home() {
               <span className="text-sm text-slate-500">{games.length} jeux disponibles</span>
             )}
           </div>
-
           {loading ? (
             <div className="flex gap-3">
               {[1, 2, 3, 4].map((i) => (
@@ -220,8 +234,6 @@ export default function Home() {
                   </div>
                 </motion.div>
               ))}
-
-              {/* Tuile "Voir tous" si > 8 jeux */}
               {hasMoreGames && (
                 <motion.div
                   whileHover={{ scale: 1.05 }}
@@ -243,105 +255,148 @@ export default function Home() {
           )}
         </section>
 
-       {/* Leaderboard */}
+        {/* Leaderboard */}
         <section>
-        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-white">🏅 Top Joueurs</h2>
-            {/* Dans la section Leaderboard, remplace le span "Classement général" par : */}
-        <button
-        onClick={() => navigate("/leaderboard")}
-        className="text-xs text-slate-400 bg-slate-800 px-3 py-1 rounded-full border border-slate-700 hover:border-purple-500/50 hover:text-purple-300 transition-all cursor-pointer"
-        >
-        Classement général →
-        </button>
-        </div>
-        <Card>
+            <button
+              onClick={() => navigate("/leaderboard")}
+              className="text-xs text-slate-400 bg-slate-800 px-3 py-1 rounded-full border border-slate-700 hover:border-purple-500/50 hover:text-purple-300 transition-all cursor-pointer"
+            >
+              Classement général →
+            </button>
+          </div>
+          <Card>
             {loading ? (
-            <div className="space-y-3">
+              <div className="space-y-3">
                 {[1, 2, 3].map((i) => (
-                <div key={i} className="h-14 rounded-xl bg-slate-700/30 animate-pulse" />
+                  <div key={i} className="h-14 rounded-xl bg-slate-700/30 animate-pulse" />
                 ))}
-            </div>
+              </div>
             ) : leaderboard.filter((p) => p.points > 0).length === 0 ? (
-            <div className="text-center py-10">
+              <div className="text-center py-10">
                 <div className="text-4xl mb-3">🌱</div>
                 <p className="text-slate-400 font-medium">Aucun joueur classé pour l'instant</p>
                 <p className="text-slate-600 text-sm mt-1">Participe à un tournoi pour apparaître ici !</p>
-            </div>
+              </div>
             ) : (
-            <div className="space-y-2">
-                {leaderboard
-                .filter((p) => p.points > 0)   // masque les joueurs à 0 pts
-                .slice(0, 5)
-                .map((player, index) => {
-                    const medal =
-                    index === 0 ? { bg: "bg-yellow-500",  text: "text-black", icon: "🥇" } :
-                    index === 1 ? { bg: "bg-slate-400",   text: "text-black", icon: "🥈" } :
-                    index === 2 ? { bg: "bg-amber-700",   text: "text-white", icon: "🥉" } :
-                                    { bg: "bg-slate-700",   text: "text-slate-300", icon: null };
-
-                    const levelColors = {
-                    beginner:  "text-slate-400",
-                    legendary: "text-yellow-400",
-                    goat:      "text-purple-400",
-                    };
-                    const levelIcons = {
-                    beginner:  "🌱",
-                    legendary: "⭐",
-                    goat:      "👑",
-                    };
-                    const level = player.level || "beginner";
-
-                    return (
+              <div className="space-y-2">
+                {leaderboard.filter((p) => p.points > 0).slice(0, 5).map((player, index) => {
+                  const medal =
+                    index === 0 ? { bg: "bg-yellow-500", text: "text-black", icon: "🥇" } :
+                    index === 1 ? { bg: "bg-slate-400",  text: "text-black", icon: "🥈" } :
+                    index === 2 ? { bg: "bg-amber-700",  text: "text-white", icon: "🥉" } :
+                                  { bg: "bg-slate-700",  text: "text-slate-300", icon: null };
+                  const levelColors = { beginner: "text-slate-400", legendary: "text-yellow-400", goat: "text-purple-400" };
+                  const levelIcons  = { beginner: "🌱", legendary: "⭐", goat: "👑" };
+                  const level = player.level || "beginner";
+                  return (
                     <div
-                        key={player.user_id}
-                        className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-700/30 transition-colors cursor-pointer group"
-                        onClick={() => navigate(`/profile/${player.user_id}`)}
+                      key={player.user_id}
+                      className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-700/30 transition-colors cursor-pointer group"
+                      onClick={() => navigate(`/profile/${player.user_id}`)}
                     >
-                        {/* Rang */}
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${medal.bg} ${medal.text}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${medal.bg} ${medal.text}`}>
                         {medal.icon || index + 1}
-                        </div>
-
-                        {/* Avatar */}
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                      </div>
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
                         {player.username?.[0]?.toUpperCase()}
-                        </div>
-
-                        {/* Infos */}
-                        <div className="flex-1 min-w-0">
-                        <p className="text-white font-medium text-sm truncate group-hover:text-purple-300 transition-colors">
-                            {player.username}
-                        </p>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium text-sm truncate group-hover:text-purple-300 transition-colors">{player.username}</p>
                         <p className={`text-xs capitalize flex items-center gap-1 ${levelColors[level]}`}>
-                            <span>{levelIcons[level]}</span>
-                            {level}
-                            {player.wins != null && (
+                          <span>{levelIcons[level]}</span>
+                          {level}
+                          {player.wins != null && (
                             <span className="text-slate-500 ml-1">· {player.wins}V / {player.losses || 0}D</span>
-                            )}
+                          )}
                         </p>
-                        </div>
-
-                        {/* Points */}
-                        <div className="text-right flex-shrink-0">
+                      </div>
+                      <div className="text-right flex-shrink-0">
                         <p className="text-purple-400 font-bold text-sm">{player.points} pts</p>
                         {player.wins != null && (
-                            <p className="text-xs text-slate-500">
-                            {player.wins + (player.losses || 0)} matchs
-                            </p>
+                          <p className="text-xs text-slate-500">{player.wins + (player.losses || 0)} matchs</p>
                         )}
-                        </div>
-
-                        <span className="text-slate-600 group-hover:text-slate-400 transition-colors flex-shrink-0">›</span>
+                      </div>
+                      <span className="text-slate-600 group-hover:text-slate-400 transition-colors flex-shrink-0">›</span>
                     </div>
-                    );
+                  );
                 })}
-            </div>
+              </div>
             )}
-        </Card>
+          </Card>
         </section>
 
       </div>
+
+      {/* FAB conversations */}
+      {user && (
+        <div className="fixed bottom-6 left-6 z-50">
+          {/* Liste conversations */}
+          <AnimatePresence>
+            {showConvs && (
+              <motion.div
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                className="mb-3 w-72 rounded-2xl border border-slate-700 shadow-xl overflow-hidden"
+                style={{ background: "#1E293B" }}
+              >
+                <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                  <span className="text-white font-semibold text-sm">💬 Conversations</span>
+                  <button
+                    onClick={() => navigate("/chat")}
+                    className="text-xs text-purple-400 hover:text-purple-300"
+                  >
+                    Voir tout →
+                  </button>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {conversations.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-slate-400 text-sm">Aucune conversation</p>
+                    </div>
+                  ) : (
+                    conversations.slice(0, 6).map((conv) => (
+                      <div
+                        key={conv.user_id || conv.id}
+                        onClick={() => { navigate(`/chat/${conv.user_id || conv.id}`); setShowConvs(false); }}
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-slate-700/50 cursor-pointer transition-colors border-b border-slate-700/50 last:border-0"
+                      >
+                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                          {conv.username?.[0]?.toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm font-medium truncate">{conv.username}</p>
+                          <p className="text-slate-400 text-xs truncate">{conv.last_message || "..."}</p>
+                        </div>
+                        {conv.is_read === 0 && (
+                          <div className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0" />
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Bouton principal */}
+          <button
+            onClick={() => setShowConvs((v) => !v)}
+            className="w-14 h-14 rounded-full text-white text-2xl shadow-lg shadow-cyan-500/30 flex items-center justify-center transition-transform hover:scale-110 relative"
+            style={{ background: "linear-gradient(135deg, #06B6D4, #7C3AED)" }}
+            title="Conversations"
+          >
+            💬
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-white text-xs font-bold flex items-center justify-center">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* FAB créer tournoi */}
       {["organizer", "admin"].includes(user?.role) && (
