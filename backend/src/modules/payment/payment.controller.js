@@ -149,4 +149,19 @@ async function getPayment(req, res, next) {
   }
 }
 
-module.exports = { pay, confirm, verify, getPayment, listPayments, updateProof };
+
+async function cancelVerify(req, res, next) {
+  try {
+    const payment_id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(payment_id)) {
+      res.status(400); return next(new Error("Invalid payment id"));
+    }
+    await paymentService.cancelVerifyPayment({ payment_id });
+    return res.status(200).json({ cancelled: true });
+  } catch (err) {
+    if (err?.statusCode) res.status(err.statusCode);
+    return next(err);
+  }
+}
+
+module.exports = { pay, confirm, verify, cancelVerify, getPayment, listPayments, updateProof };

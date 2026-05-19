@@ -126,11 +126,15 @@ export default function Admin() {
   };
 
   // ─── Paiements ───
-  const verifyPayment = async (id) => {
-    try { await api.post(`/payments/${id}/verify`); toast.success("Paiement validé ✅"); fetchAll(); }
-    catch (e) { toast.error(e.response?.data?.message || "Erreur"); }
-  };
-
+const cancelPaymentVerification = async (id) => {
+  try {
+    await api.post(`/payments/${id}/cancel-verify`);
+    toast.success("Validation annulée ↩️");
+    fetchAll();
+  } catch (e) {
+    toast.error(e.response?.data?.message || "Erreur");
+  }
+};
  const viewProof = (path) => {
   setProofImage(path);   // path EST déjà l'URL Cloudinary complète
   setProofModal(true);
@@ -328,16 +332,16 @@ export default function Admin() {
         {loading ? (
           <div className="space-y-3">{[1,2,3].map((i) => <div key={i} className="h-16 bg-slate-800/50 rounded-xl animate-pulse" />)}</div>
         ) : (
-          <>
+                      <>
             {/* ══ DASHBOARD ══ */}
             {tab === "dashboard" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
-                    { emoji: "👥", label: "Utilisateurs",      value: users.length,          color: "text-cyan-400"   },
-                    { emoji: "🏆", label: "Tournois",          value: tournaments.length,     color: "text-purple-400" },
-                    { emoji: "⏳", label: "Paiements/attente", value: pendingPayments.length, color: "text-yellow-400" },
-                    { emoji: "💰", label: "Revenus validés",   value: `${totalRevenue.toLocaleString()} F`, color: "text-green-400" },
+                    { emoji: "👥", label: "Utilisateurs",      value: users.length,                                                      color: "text-cyan-400"   },
+                    { emoji: "🏆", label: "Tournois",          value: tournaments.length,                                                 color: "text-purple-400" },
+                    { emoji: "⏳", label: "Paiements/attente", value: payments.filter((p) => p.proof_image && !p.verified_by_admin).length, color: "text-yellow-400" },
+                    { emoji: "💰", label: "Revenus validés",   value: `${totalRevenue.toLocaleString()} F`,                              color: "text-green-400"  },
                   ].map((s) => (
                     <Card key={s.label} className="text-center">
                       <div className="text-3xl mb-2">{s.emoji}</div>
@@ -348,9 +352,9 @@ export default function Admin() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { emoji: "🚨", label: "Signalements/attente", value: pendingReports.length, color: "text-red-400" },
-                    { emoji: "🎮", label: "Jeux disponibles",     value: games.length,          color: "text-cyan-400" },
-                    { emoji: "✅", label: "Paiements validés",    value: payments.filter((p) => p.verified_by_admin).length, color: "text-green-400" },
+                    { emoji: "🚨", label: "Signalements/attente", value: pendingReports.length,                                    color: "text-red-400"   },
+                    { emoji: "🎮", label: "Jeux disponibles",     value: games.length,                                             color: "text-cyan-400"  },
+                    { emoji: "✅", label: "Paiements validés",    value: payments.filter((p) => p.verified_by_admin).length,       color: "text-green-400" },
                   ].map((s) => (
                     <Card key={s.label} className="text-center">
                       <div className="text-3xl mb-2">{s.emoji}</div>
@@ -365,16 +369,22 @@ export default function Admin() {
             {/* ══ PAIEMENTS ══ */}
             {tab === "payments" && (
               <div className="space-y-3">
-                {payments.length === 0 ? (
-                  <Card className="text-center py-10"><div className="text-3xl mb-3">💳</div><p className="text-slate-400">Aucun paiement</p></Card>
-                ) : payments.map((p) => (
+                {payments.filter((p) => p.proof_image).length === 0 ? (
+                  <Card className="text-center py-10">
+                    <div className="text-3xl mb-3">💳</div>
+                    <p className="text-slate-400">Aucun paiement avec capture soumise</p>
+                  </Card>
+                ) : payments.filter((p) => p.proof_image).map((p) => (
                   <Card key={p.id} className="flex items-center gap-4 flex-wrap">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                          p.verified_by_admin ? "bg-green-500/20 text-green-400 border-green-500/30"
-                          : p.status === "failed" ? "bg-red-500/20 text-red-400 border-red-500/30"
-                          : "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"}`}>
+                          p.verified_by_admin
+                            ? "bg-green-500/20 text-green-400 border-green-500/30"
+                            : p.status === "failed"
+                            ? "bg-red-500/20 text-red-400 border-red-500/30"
+                            : "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+                        }`}>
                           {p.verified_by_admin ? "✅ Validé" : p.status === "failed" ? "❌ Échoué" : "⏳ En attente"}
                         </span>
                         <span className="text-slate-500 text-xs">#{p.id}</span>
@@ -383,17 +393,29 @@ export default function Admin() {
                         {p.username || `Joueur #${p.user_id}`} · Tournoi #{p.tournament_id}
                       </p>
                       <p className="text-slate-400 text-xs">
-                        {Number(p.amount).toLocaleString()} FCFA{p.method ? ` · ${p.method}` : ""}
+                        {Number(p.amount).toLocaleString()} FCFA
+                        {p.method ? ` · ${p.method}` : ""}
                         {p.transaction_ref ? ` · Réf: ${p.transaction_ref}` : ""}
                         {" · "}{formatDateTime(p.created_at)}
                       </p>
                     </div>
                     <div className="flex gap-2 flex-wrap">
                       {p.proof_image && (
-                        <Button size="sm" variant="outline" onClick={() => viewProof(p.proof_image)}>📸 Preuve</Button>
+                        <Button size="sm" variant="outline" onClick={() => viewProof(p.proof_image)}>
+                          📸 Preuve
+                        </Button>
                       )}
                       {!p.verified_by_admin && p.status !== "failed" && (
-                        <Button size="sm" onClick={() => verifyPayment(p.id)}>✅ Valider</Button>
+                        <Button size="sm" onClick={() => verifyPayment(p.id)}>
+                          ✅ Valider
+                        </Button>
+                      )}
+                      {p.verified_by_admin && (
+                        <Button size="sm" variant="outline"
+                          onClick={() => cancelPaymentVerification(p.id)}
+                          className="border-red-500/30 text-red-400 hover:bg-red-500/10">
+                          ↩️ Annuler
+                        </Button>
                       )}
                     </div>
                   </Card>

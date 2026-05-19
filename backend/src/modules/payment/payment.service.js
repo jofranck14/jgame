@@ -150,4 +150,55 @@ async function verifyPaymentByAdmin({ payment_id }) {
   finally { client.release(); }
 }
 
-module.exports = { createPayment, confirmPayment, getPaymentById, verifyPaymentByAdmin };
+async function cancelVerifyPayment({ payment_id }) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const pRes = await client.query(
+      "SELECT id, user_id, tournament_id, verified_by_admin FROM payments WHERE id = $1 FOR UPDATE",
+      [payment_id],
+    );
+    const payment = pRes.rows[0];
+    if (!payment) { const e = new Error("Payment not found"); e.statusCode = 404; throw e; }
+    if (!payment.verified_by_admin) {
+      const e = new Error("Payment not verified yet"); e.statusCode = 400; throw e;
+    }
+
+    // Annuler la validation
+    await client.query("UPDATE payments SET verified_by_admin = 0 WHERE id = $1", [payment_id]);
+
+    // Retirer le joueur des participants
+    await client.query(
+      "DELETE FROM participants WHERE tournament_id = $1 AND user_id = $2",
+      [payment.tournament_id, payment.user_id],
+    );
+
+    // Notifier le joueur
+    const tRes = await client.query(
+      "SELECT title FROM tournaments WHERE id = $1 LIMIT 1", [payment.tournament_id],
+    );
+    const tournamentTitle = tRes.rows[0]?.title || `Tournoi #${payment.tournament_id}`;
+
+    await client.query(
+      "INSERT INTO notifications (user_id, type, title, message, link, is_read) VALUES ($1, 'payment', $2, $3, $4, 0)",
+      [
+        payment.user_id,
+        "❌ Validation annulée",
+        `La validation de ton paiement pour "${tournamentTitle}" a été annulée par l'admin. Contacte le support si c'est une erreur.`,
+        `/tournaments/${payment.tournament_id}`,
+      ],
+    );
+
+    await client.query("COMMIT");
+    return { cancelled: true };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+
+module.exports = { createPayment, confirmPayment, getPaymentById, verifyPaymentByAdmin, cancelVerifyPayment };
