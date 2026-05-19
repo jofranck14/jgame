@@ -135,6 +135,17 @@ const cancelPaymentVerification = async (id) => {
     toast.error(e.response?.data?.message || "Erreur");
   }
 };
+
+const verifyPayment = async (id) => {
+  try {
+    await api.post(`/payments/${id}/verify`);
+    toast.success("Paiement validé ✅");
+    fetchAll();
+  } catch (e) {
+    toast.error(e.response?.data?.message || "Erreur");
+  }
+};
+
  const viewProof = (path) => {
   setProofImage(path);   // path EST déjà l'URL Cloudinary complète
   setProofModal(true);
@@ -395,7 +406,7 @@ const cancelPaymentVerification = async (id) => {
                       <p className="text-slate-400 text-xs">
                         {Number(p.amount).toLocaleString()} FCFA
                         {p.method ? ` · ${p.method}` : ""}
-                        {p.transaction_ref ? ` · Réf: ${p.transaction_ref}` : ""}
+                        {p.transaction_ref && p.transaction_ref !== "0" ? ` · Réf: ${p.transaction_ref}` : ""}
                         {" · "}{formatDateTime(p.created_at)}
                       </p>
                     </div>
