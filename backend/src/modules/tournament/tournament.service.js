@@ -119,7 +119,6 @@ async function joinTournament(tournamentId, userId) {
   try {
     await client.query("BEGIN");
 
-    // 1. Verrouiller la ligne du tournoi SANS GROUP BY
     const tRes = await client.query(
       "SELECT id, title, price, max_players FROM tournaments WHERE id = $1 FOR UPDATE",
       [tournamentId],
@@ -127,13 +126,11 @@ async function joinTournament(tournamentId, userId) {
     const t = tRes.rows[0];
     if (!t) { const e = new Error("Tournament not found"); e.statusCode = 404; throw e; }
 
-    // 2. Compter les participants séparément
     const countRes = await client.query(
       "SELECT COUNT(*) AS current_players FROM participants WHERE tournament_id = $1",
       [tournamentId],
     );
     const currentPlayers = Number(countRes.rows[0]?.current_players) || 0;
-
     if (currentPlayers >= Number(t.max_players)) {
       const e = new Error("Tournament is full"); e.statusCode = 409; throw e;
     }
@@ -144,7 +141,7 @@ async function joinTournament(tournamentId, userId) {
         "SELECT id, status FROM payments WHERE tournament_id = $1 AND user_id = $2 ORDER BY id DESC LIMIT 1",
         [tournamentId, userId],
       );
-      let paymentId = pRows.rows[0]?.id || null;
+      let paymentId     = pRows.rows[0]?.id || null;
       let paymentStatus = pRows.rows[0]?.status || null;
 
       if (!paymentId) {
@@ -152,24 +149,9 @@ async function joinTournament(tournamentId, userId) {
           "INSERT INTO payments (user_id, tournament_id, amount, status, verified_by_admin) VALUES ($1, $2, $3, 'pending', 0) RETURNING id",
           [userId, tournamentId, amount],
         );
-        paymentId = pRes.rows[0].id;
+        paymentId     = pRes.rows[0].id;
         paymentStatus = "pending";
-
-        try {
-          const admins = await client.query("SELECT id FROM users WHERE role = 'admin'");
-          if (admins.rows.length) {
-            const uRows = await client.query("SELECT username FROM users WHERE id = $1 LIMIT 1", [userId]);
-            const username = uRows.rows[0]?.username || `#${userId}`;
-            for (const a of admins.rows) {
-              await client.query(
-                "INSERT INTO notifications (user_id, type, title, message, link, is_read) VALUES ($1, $2, $3, $4, $5, 0)",
-                [a.id, "payment", "💳 Paiement en attente",
-                 `${username} a soumis un paiement de ${amount.toLocaleString()} FCFA pour "${t.title}". À valider.`,
-                 "/admin"]
-              );
-            }
-          }
-        } catch (_) {}
+        // ✅ Pas de notification ici — envoyée après upload de la capture dans updateProof
       }
 
       await client.query("COMMIT");
@@ -180,6 +162,7 @@ async function joinTournament(tournamentId, userId) {
       };
     }
 
+    // Tournoi gratuit → inscription directe
     try {
       await client.query(
         "INSERT INTO participants (tournament_id, user_id, payment_status) VALUES ($1, $2, 'paid')",

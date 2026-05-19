@@ -74,27 +74,51 @@ async function updateProof(req, res, next) {
     const proof_image = req.file?.path ?? null;
 
     if (!proof_image) {
-      res.status(400);
-      return next(new Error("proof_image is required"));
+      res.status(400); return next(new Error("proof_image is required"));
     }
 
     const existing = await pool.query(
-      "SELECT id, user_id FROM payments WHERE id = $1 LIMIT 1",
+      "SELECT id, user_id, tournament_id, amount FROM payments WHERE id = $1 LIMIT 1",
       [payment_id]
     );
-    if (!existing.rows[0]) {
-      res.status(404);
-      return next(new Error("Payment not found"));
-    }
+    if (!existing.rows[0]) { res.status(404); return next(new Error("Payment not found")); }
     if (Number(existing.rows[0].user_id) !== Number(req.user.id)) {
-      res.status(403);
-      return next(new Error("Forbidden"));
+      res.status(403); return next(new Error("Forbidden"));
     }
 
     await pool.query(
       "UPDATE payments SET proof_image = $1, method = COALESCE($2, method) WHERE id = $3",
       [proof_image, method, payment_id]
     );
+
+    // ✅ Notification admin envoyée ICI, après upload de la capture
+    try {
+      const admins = await pool.query("SELECT id FROM users WHERE role = 'admin'");
+      if (admins.rows.length) {
+        const uRows = await pool.query(
+          "SELECT username FROM users WHERE id = $1 LIMIT 1", [req.user.id]
+        );
+        const username = uRows.rows[0]?.username || `#${req.user.id}`;
+        const tRows = await pool.query(
+          "SELECT title FROM tournaments WHERE id = $1 LIMIT 1",
+          [existing.rows[0].tournament_id]
+        );
+        const tournamentTitle = tRows.rows[0]?.title || `Tournoi #${existing.rows[0].tournament_id}`;
+        const amount = Number(existing.rows[0].amount);
+
+        for (const a of admins.rows) {
+          await pool.query(
+            "INSERT INTO notifications (user_id, type, title, message, link, is_read) VALUES ($1, $2, $3, $4, $5, 0)",
+            [
+              a.id, "payment",
+              "💳 Paiement en attente",
+              `${username} a soumis une preuve de paiement de ${amount.toLocaleString()} FCFA pour "${tournamentTitle}". À valider.`,
+              "/admin"
+            ]
+          );
+        }
+      }
+    } catch (_) {}
 
     const { rows } = await pool.query(
       "SELECT id, user_id, tournament_id, amount, status, method, proof_image, verified_by_admin, created_at FROM payments WHERE id = $1 LIMIT 1",

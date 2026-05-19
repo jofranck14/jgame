@@ -67,7 +67,9 @@ async function getUserGames(req, res, next) {
 async function addUserGame(req, res, next) {
   try {
     const userId = Number.parseInt(req.params.id, 10);
-    if (userId !== req.user.id && req.user.role !== "admin") { res.status(403); return next(new Error("Forbidden")); }
+    if (Number(userId) !== Number(req.user.id) && req.user.role !== "admin") {
+      res.status(403); return next(new Error("Forbidden"));
+    }
     const gameId = Number.parseInt(req.body?.game_id, 10);
     if (!Number.isFinite(gameId)) { res.status(400); return next(new Error("Invalid game_id")); }
     return res.status(201).json({ userGame: await userService.addUserGame(userId, gameId) });
@@ -77,7 +79,9 @@ async function addUserGame(req, res, next) {
 async function removeUserGame(req, res, next) {
   try {
     const userId = Number.parseInt(req.params.id, 10);
-    if (userId !== req.user.id && req.user.role !== "admin") { res.status(403); return next(new Error("Forbidden")); }
+    if (Number(userId) !== Number(req.user.id) && req.user.role !== "admin") {
+      res.status(403); return next(new Error("Forbidden"));
+    }
     const gameId = Number.parseInt(req.params.gameId, 10);
     if (!Number.isFinite(gameId)) { res.status(400); return next(new Error("Invalid gameId")); }
     await userService.removeUserGame(userId, gameId);
