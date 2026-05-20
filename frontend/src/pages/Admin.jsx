@@ -72,31 +72,37 @@ export default function Admin() {
   const [games, setGames]             = useState([]);
 
   // Modals
-  const [proofModal, setProofModal]       = useState(false);
-  const [proofImage, setProofImage]       = useState(null);
+  const [proofModal, setProofModal]   = useState(false);
+  const [proofImage, setProofImage]   = useState(null);
 
-  // Modal résultats — avec chargement des participants
-  const [resultModal, setResultModal]     = useState(false);
-  const [selectedT, setSelectedT]         = useState(null);
-  const [participants, setParticipants]   = useState([]);
-  const [loadingParts, setLoadingParts]   = useState(false);
-  const [rankings, setRankings]           = useState([
+  // Modal prolonger date
+  const [extendModal, setExtendModal]             = useState(false);
+  const [extendTournament, setExtendTournament]   = useState(null);
+  const [extendDate, setExtendDate]               = useState("");
+  const [extending, setExtending]                 = useState(false);
+
+  // Modal résultats
+  const [resultModal, setResultModal]   = useState(false);
+  const [selectedT, setSelectedT]       = useState(null);
+  const [participants, setParticipants] = useState([]);
+  const [loadingParts, setLoadingParts] = useState(false);
+  const [rankings, setRankings]         = useState([
     { user_id: "", rank: 1 },
     { user_id: "", rank: 2 },
     { user_id: "", rank: 3 },
   ]);
 
-  const [userModal, setUserModal]         = useState(false);
-  const [selectedUser, setSelectedUser]   = useState(null);
+  const [userModal, setUserModal]     = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
 
-  const [gameModal, setGameModal]         = useState(false);
-  const [gameForm, setGameForm]           = useState({ id: null, name: "" });
+  const [gameModal, setGameModal] = useState(false);
+  const [gameForm, setGameForm]   = useState({ id: null, name: "" });
 
   const [announceModal, setAnnounceModal] = useState(false);
   const [announce, setAnnounce]           = useState({ title: "", message: "", target: "all" });
   const [announcing, setAnnouncing]       = useState(false);
 
-  const [confirm, setConfirm]             = useState({ open: false, title: "", message: "", onConfirm: () => {}, danger: false });
+  const [confirm, setConfirm] = useState({ open: false, title: "", message: "", onConfirm: () => {}, danger: false });
 
   useEffect(() => {
     if (!user) return;
@@ -126,30 +132,31 @@ export default function Admin() {
   };
 
   // ─── Paiements ───
-const cancelPaymentVerification = async (id) => {
-  try {
-    await api.post(`/payments/${id}/cancel-verify`);
-    toast.success("Validation annulée ↩️");
-    fetchAll();
-  } catch (e) {
-    toast.error(e.response?.data?.message || "Erreur");
-  }
-};
+  const cancelPaymentVerification = async (id) => {
+    try {
+      await api.post(`/payments/${id}/cancel-verify`);
+      toast.success("Validation annulée ↩️");
+      fetchAll();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "Erreur");
+    }
+  };
 
-const verifyPayment = async (id) => {
-  try {
-    await api.post(`/payments/${id}/verify`);
-    toast.success("Paiement validé ✅");
-    fetchAll();
-  } catch (e) {
-    toast.error(e.response?.data?.message || "Erreur");
-  }
-};
+  const verifyPayment = async (id) => {
+    try {
+      await api.post(`/payments/${id}/verify`);
+      toast.success("Paiement validé ✅");
+      fetchAll();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "Erreur");
+    }
+  };
 
- const viewProof = (path) => {
-  setProofImage(path);   // path EST déjà l'URL Cloudinary complète
-  setProofModal(true);
-};
+  const viewProof = (path) => {
+    setProofImage(path);
+    setProofModal(true);
+  };
+
   // ─── Résultats ───
   const openResultModal = async (t) => {
     setSelectedT(t);
@@ -171,7 +178,6 @@ const verifyPayment = async (id) => {
   const submitResults = async () => {
     const valid = rankings.filter((r) => r.user_id !== "");
     if (!valid.length) return toast.error("Sélectionne au moins 1 joueur");
-    // Vérifier qu'il n'y a pas de doublons
     const ids = valid.map((r) => r.user_id);
     if (new Set(ids).size !== ids.length) {
       return toast.error("Un joueur ne peut pas être sélectionné deux fois !");
@@ -185,6 +191,29 @@ const verifyPayment = async (id) => {
       setResultModal(false);
       fetchAll();
     } catch (e) { toast.error(e.response?.data?.message || "Erreur"); }
+  };
+
+  // ─── Prolonger date ───
+  const submitExtendDate = async () => {
+    if (!extendDate) { toast.error("Choisis une nouvelle date"); return; }
+    setExtending(true);
+    try {
+      await api.patch(`/tournaments/${extendTournament.id}`, { start_date: extendDate });
+      toast.success("Date prolongée ✅");
+      // Notifier les participants
+      try {
+        await api.post(`/tournaments/${extendTournament.id}/message`,
+          { message: `📅 La date du tournoi a été modifiée. Nouvelle date : ${new Date(extendDate).toLocaleString("fr-FR")}` }
+        );
+      } catch (_) {}
+      setExtendModal(false);
+      setExtendDate("");
+      fetchAll();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "Erreur");
+    } finally {
+      setExtending(false);
+    }
   };
 
   // ─── Tournois ───
@@ -290,18 +319,18 @@ const verifyPayment = async (id) => {
   };
 
   // ─── Computed ───
-  const pendingPayments = payments.filter((p) => !p.verified_by_admin && p.status !== "failed");
+  const pendingPayments = payments.filter((p) => p.proof_image && !p.verified_by_admin && p.status !== "failed");
   const pendingReports  = reports.filter((r) => r.status === "pending");
   const totalRevenue    = payments.filter((p) => p.verified_by_admin).reduce((s, p) => s + Number(p.amount || 0), 0);
 
   const tabs = [
-    { key: "dashboard",   label: "📊 Dashboard"    },
-    { key: "payments",    label: "💳 Paiements",    badge: pendingPayments.length },
-    { key: "tournaments", label: "🏆 Tournois"      },
-    { key: "users",       label: "👥 Utilisateurs"  },
-    { key: "games",       label: "🎮 Jeux"          },
-    { key: "reports",     label: "🚨 Signalements",  badge: pendingReports.length },
-    { key: "announce",    label: "📢 Annonces"      },
+    { key: "dashboard",   label: "📊 Dashboard"   },
+    { key: "payments",    label: "💳 Paiements",   badge: pendingPayments.length },
+    { key: "tournaments", label: "🏆 Tournois"     },
+    { key: "users",       label: "👥 Utilisateurs" },
+    { key: "games",       label: "🎮 Jeux"         },
+    { key: "reports",     label: "🚨 Signalements", badge: pendingReports.length },
+    { key: "announce",    label: "📢 Annonces"     },
   ];
 
   return (
@@ -343,16 +372,16 @@ const verifyPayment = async (id) => {
         {loading ? (
           <div className="space-y-3">{[1,2,3].map((i) => <div key={i} className="h-16 bg-slate-800/50 rounded-xl animate-pulse" />)}</div>
         ) : (
-                      <>
+          <>
             {/* ══ DASHBOARD ══ */}
             {tab === "dashboard" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
-                    { emoji: "👥", label: "Utilisateurs",      value: users.length,                                                      color: "text-cyan-400"   },
-                    { emoji: "🏆", label: "Tournois",          value: tournaments.length,                                                 color: "text-purple-400" },
-                    { emoji: "⏳", label: "Paiements/attente", value: payments.filter((p) => p.proof_image && !p.verified_by_admin).length, color: "text-yellow-400" },
-                    { emoji: "💰", label: "Revenus validés",   value: `${totalRevenue.toLocaleString()} F`,                              color: "text-green-400"  },
+                    { emoji: "👥", label: "Utilisateurs",      value: users.length,                                                              color: "text-cyan-400"   },
+                    { emoji: "🏆", label: "Tournois",          value: tournaments.length,                                                         color: "text-purple-400" },
+                    { emoji: "⏳", label: "Paiements/attente", value: payments.filter((p) => p.proof_image && !p.verified_by_admin).length,        color: "text-yellow-400" },
+                    { emoji: "💰", label: "Revenus validés",   value: `${totalRevenue.toLocaleString()} F`,                                       color: "text-green-400"  },
                   ].map((s) => (
                     <Card key={s.label} className="text-center">
                       <div className="text-3xl mb-2">{s.emoji}</div>
@@ -363,9 +392,9 @@ const verifyPayment = async (id) => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { emoji: "🚨", label: "Signalements/attente", value: pendingReports.length,                                    color: "text-red-400"   },
-                    { emoji: "🎮", label: "Jeux disponibles",     value: games.length,                                             color: "text-cyan-400"  },
-                    { emoji: "✅", label: "Paiements validés",    value: payments.filter((p) => p.verified_by_admin).length,       color: "text-green-400" },
+                    { emoji: "🚨", label: "Signalements/attente", value: pendingReports.length,                              color: "text-red-400"   },
+                    { emoji: "🎮", label: "Jeux disponibles",     value: games.length,                                       color: "text-cyan-400"  },
+                    { emoji: "✅", label: "Paiements validés",    value: payments.filter((p) => p.verified_by_admin).length, color: "text-green-400" },
                   ].map((s) => (
                     <Card key={s.label} className="text-center">
                       <div className="text-3xl mb-2">{s.emoji}</div>
@@ -450,10 +479,10 @@ const verifyPayment = async (id) => {
                       <p className="text-slate-400 text-xs">
                         🎮 {t.game_name || "—"} · 👥 {t.current_players || 0}/{t.max_players}
                         {" · "}{Number(t.price || 0).toLocaleString()} FCFA
+                        {" · 📅 "}{formatDateTime(t.date || t.start_date)}
                       </p>
                     </div>
                     <div className="flex gap-2 flex-wrap items-center">
-                      {/* ── Forcer statut en français ── */}
                       <select
                         defaultValue=""
                         onChange={(e) => {
@@ -466,6 +495,17 @@ const verifyPayment = async (id) => {
                         <option value="completed">✅ Terminé</option>
                         <option value="cancelled">❌ Annulé</option>
                       </select>
+                      {/* Bouton prolonger date */}
+                      <button
+                        onClick={() => {
+                          setExtendTournament(t);
+                          setExtendDate(t.date ? new Date(t.date).toISOString().slice(0, 16) : "");
+                          setExtendModal(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 text-xs transition-all"
+                        title="Prolonger la date">
+                        📅
+                      </button>
                       {t.status !== "completed" && t.status !== "cancelled" && (
                         <Button size="sm" onClick={() => openResultModal(t)}>🏆 Résultats</Button>
                       )}
@@ -498,7 +538,7 @@ const verifyPayment = async (id) => {
                       <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <p className="text-white font-medium text-sm">{u.username}</p>
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                          u.role === "admin"     ? "bg-red-500/20 text-red-400 border-red-500/30"
+                          u.role === "admin"      ? "bg-red-500/20 text-red-400 border-red-500/30"
                           : u.role === "organizer" ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/30"
                           : "bg-slate-500/20 text-slate-400 border-slate-500/30"}`}>
                           {u.role}
@@ -572,7 +612,7 @@ const verifyPayment = async (id) => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                          r.status === "pending"  ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+                          r.status === "pending"   ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
                           : r.status === "resolved" ? "bg-green-500/20 text-green-400 border-green-500/30"
                           : "bg-slate-500/20 text-slate-400 border-slate-500/30"}`}>
                           {r.status === "pending" ? "⏳ En attente" : r.status === "resolved" ? "✅ Résolu" : "❌ Rejeté"}
@@ -599,7 +639,7 @@ const verifyPayment = async (id) => {
               <div className="max-w-2xl space-y-4">
                 <Card>
                   <h2 className="text-white font-semibold mb-1">📢 Envoyer une annonce</h2>
-                  <p className="text-slate-500 text-xs mb-5">L'annonce créera une notification pour les utilisateurs ciblés. Le badge 🔔 s'affichera sur leur cloche.</p>
+                  <p className="text-slate-500 text-xs mb-5">L'annonce créera une notification pour les utilisateurs ciblés.</p>
                   <div className="space-y-4">
                     <div>
                       <label className="text-slate-400 text-xs mb-1 block">Destinataires</label>
@@ -664,33 +704,67 @@ const verifyPayment = async (id) => {
         </div>
       </Modal>
 
+      {/* ══ MODAL Prolonger date ══ */}
+      <Modal isOpen={extendModal} onClose={() => { setExtendModal(false); setExtendDate(""); }} title="📅 Prolonger la date du tournoi">
+        <div className="space-y-4">
+          <div className="rounded-xl p-3"
+            style={{ background: "rgba(6,182,212,0.1)", border: "1px solid rgba(6,182,212,0.3)" }}>
+            <p className="text-cyan-300 text-xs font-semibold mb-1">{extendTournament?.title}</p>
+            <p className="text-slate-400 text-xs">
+              Date actuelle : {extendTournament?.date ? formatDateTime(extendTournament.date) : "Non définie"}
+            </p>
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs mb-2 block">
+              Nouvelle date <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="datetime-local"
+              value={extendDate}
+              onChange={(e) => setExtendDate(e.target.value)}
+              className={iStyle}
+              min={new Date().toISOString().slice(0, 16)}
+            />
+          </div>
+          <div className="rounded-xl p-3"
+            style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.3)" }}>
+            <p className="text-purple-300 text-xs">
+              📢 Les participants seront automatiquement notifiés de la nouvelle date.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" className="flex-1"
+              onClick={() => { setExtendModal(false); setExtendDate(""); }}>
+              Annuler
+            </Button>
+            <Button className="flex-1" disabled={!extendDate || extending} onClick={submitExtendDate}>
+              {extending ? "Enregistrement..." : "✅ Confirmer"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* ══ MODAL Résultats ══ */}
       <Modal isOpen={resultModal} onClose={() => setResultModal(false)} title="🏆 Enregistrer les résultats">
         <div className="space-y-4">
           <p className="text-slate-400 text-sm font-medium">{selectedT?.title}</p>
-
           {loadingParts ? (
             <div className="space-y-2">
               {[1,2,3].map((i) => <div key={i} className="h-10 rounded-xl bg-slate-700/30 animate-pulse" />)}
             </div>
           ) : participants.length === 0 ? (
             <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
-              <p className="text-yellow-400 text-xs">⚠️ Aucun participant trouvé pour ce tournoi. Assure-toi que des joueurs ont rejoint avant d'enregistrer les résultats.</p>
+              <p className="text-yellow-400 text-xs">⚠️ Aucun participant trouvé pour ce tournoi.</p>
             </div>
           ) : (
             <>
-              <p className="text-slate-500 text-xs">{participants.length} participant{participants.length > 1 ? "s" : ""} · Chaque joueur ne peut être sélectionné qu'une fois</p>
+              <p className="text-slate-500 text-xs">{participants.length} participant{participants.length > 1 ? "s" : ""}</p>
               {rankings.map((entry, i) => {
-                // Options filtrées : exclure les user_id déjà choisis dans les autres rangs
                 const usedIds = rankings.filter((_, idx) => idx !== i).map((r) => r.user_id).filter(Boolean);
-                const available = participants.filter((p) => !usedIds.includes(String(p.user_id || p.id)));
-
                 return (
                   <div key={i} className="flex items-center gap-3">
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${
-                      i === 0 ? "bg-yellow-500 text-black"
-                      : i === 1 ? "bg-slate-400 text-black"
-                      : "bg-amber-700 text-white"
+                      i === 0 ? "bg-yellow-500 text-black" : i === 1 ? "bg-slate-400 text-black" : "bg-amber-700 text-white"
                     }`}>
                       {["🥇","🥈","🥉"][i]}
                     </div>
@@ -703,7 +777,6 @@ const verifyPayment = async (id) => {
                       }}
                       className={iStyle}>
                       <option value="">{i === 0 ? "Sélectionne le 1er (obligatoire)" : `Sélectionne le ${i+1}e (optionnel)`}</option>
-                      {/* Afficher le participant actuellement sélectionné même s'il n'est plus dans "available" */}
                       {participants
                         .filter((p) => {
                           const pid = String(p.user_id || p.id);
@@ -724,7 +797,6 @@ const verifyPayment = async (id) => {
               })}
             </>
           )}
-
           <div className="flex gap-3 pt-1">
             <Button variant="outline" className="flex-1" onClick={() => setResultModal(false)}>Annuler</Button>
             <Button className="flex-1" onClick={submitResults} disabled={loadingParts || participants.length === 0}>
