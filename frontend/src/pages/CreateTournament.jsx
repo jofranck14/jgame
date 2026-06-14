@@ -52,7 +52,7 @@ export default function CreateTournament() {
 
   const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { type: "online", price: "0" },
+    defaultValues: { type: "physical", price: "0" },
   });
 
   const type = watch("type");
@@ -124,22 +124,28 @@ export default function CreateTournament() {
             </div>
 
             {/* Type */}
+                       
             <div>
               <label className="text-sm text-slate-400 mb-2 block">Type de tournoi</label>
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { value: "online",   label: "🌐 En ligne",   desc: "Joueurs partout au Cameroun" },
                   { value: "physical", label: "📍 Présentiel", desc: "Lieu physique défini" },
-                ].map((opt) => (
-                  <label key={opt.value}
-                    className={`cursor-pointer rounded-xl p-4 border transition-all ${
-                      type === opt.value ? "border-purple-500 bg-purple-500/10" : "border-slate-700 bg-slate-900/50 hover:border-slate-600"
-                    }`}>
-                    <input {...register("type")} type="radio" value={opt.value} className="sr-only" />
-                    <p className="text-white font-medium text-sm">{opt.label}</p>
-                    <p className="text-slate-400 text-xs mt-0.5">{opt.desc}</p>
-                  </label>
-                ))}
+                ]
+                  .filter((opt) => user?.role === "admin" || opt.value === "physical")
+                  .map((opt) => (
+                    <label key={opt.value}
+                      className={`cursor-pointer rounded-xl p-4 border transition-all ${
+                        type === opt.value
+                          ? "border-purple-500 bg-purple-500/10"
+                          : "border-slate-700 bg-slate-900/50 hover:border-slate-600"
+                      }`}>
+                      <input {...register("type")} type="radio" value={opt.value} className="sr-only" />
+                      <p className="text-white font-medium text-sm">{opt.label}</p>
+                      <p className="text-slate-400 text-xs mt-0.5">{opt.desc}</p>
+                    </label>
+                  ))
+                }
               </div>
             </div>
 
